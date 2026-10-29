@@ -10,6 +10,8 @@ import { initStore, syncStore, onStore, autoLockMinutes } from './store.js';
 import { handleRedirect } from './sources/oauth.js';
 import { renderBrowse, renderFolder, renderRecent, renderFavorites, renderSearchAll, renderAll, allHash } from './files.js';
 import { renderSettings } from './settings.js';
+import { renderAddons } from './addons/index.js';
+import { ADDONS, syncAll } from './addons/store.js';
 import { renderFritz } from './fritz.js';
 import { openAddCloud, finishOAuth } from './addcloud.js';
 import { favorites, srcColor } from './fileops.js';
@@ -21,6 +23,7 @@ const TABS = [
   ['zuletzt', 'Zuletzt', 'clock'],
   ['orte', 'Durchsuchen', 'folder'],
   ['favoriten', 'Favoriten', 'star'],
+  ['a', 'Orbit', 'grid'],
   ['einstellungen', 'Einstellungen', 'gear'],
 ];
 
@@ -42,7 +45,7 @@ function shell() {
 function paintSide() {
   if (!side) return;
   const { parts } = route();
-  const here = parts[0] === 'd' ? 'd:' + parts[1] : parts[0];
+  const here = parts[0] === 'd' ? 'd:' + parts[1] : parts[0] === 'a' && parts[1] ? 'a:' + parts[1] : parts[0];
   const item = (id, label, ic, href, color) => h('a.sitem' + (here === id ? '.on' : ''), { href },
     color ? h('span.srcicon.small', { style: { background: color } }, icon(ic)) : icon(ic), h('span', label));
   clear(side).append(
@@ -53,6 +56,8 @@ function paintSide() {
     ...connections().map((c) => item('d:' + c.id, c.name, c.type === 'demo' ? 'layers' : 'cloud', dirHash(c.id), srcColor(c.id))),
     item('fritz', 'FRITZ!NAS', 'disk', '#/fritz', '#E2001A'),
     h('button.sitem.add', { onclick: () => openAddCloud() }, icon('plus'), h('span', 'Cloud hinzufügen')),
+    h('div.side-title', 'Orbit'),
+    ...ADDONS.map((a) => item('a:' + a.id, a.title, a.icon, '#/a/' + a.id, a.color)),
     favorites().length ? h('div.side-title', 'Favoriten') : null,
     ...favorites().slice(0, 12).map((f) => item(null, f.name, f.isFolder ? 'folder' : 'file', f.isFolder ? dirHash(f.conn, f.path) : dirHash(f.conn, f.path.slice(0, f.path.lastIndexOf('/')) || '/'))),
     h('div.side-title', ''),
@@ -96,6 +101,7 @@ async function render() {
     else if (page === 'zuletzt') { view.scrollTop = 0; await renderRecent(view); }
     else if (page === 'favoriten') { view.scrollTop = 0; await renderFavorites(view); }
     else if (page === 'suche') await renderSearchAll(view, query.get('q') || '');
+    else if (page === 'a') await renderAddons(view, parts);
     else if (page === 'fritz') { view.scrollTop = 0; await renderFritz(view); }
     else if (page === 'einstellungen') { view.scrollTop = 0; await renderSettings(view, parts); }
     else go('#/orte', { replace: true });
@@ -201,7 +207,7 @@ function movedNotice() {
   try { oauth = await handleRedirect(); } catch (e) { oauth = { error: e.message + (e.detail ? ` (${e.detail})` : '') }; }
   document.getElementById('splash')?.remove();
   if (connections().length && lockEnabled()) await showLockScreen();
-  if (!location.hash || !/^#\/(orte|d|alle|zuletzt|favoriten|einstellungen|suche|fritz)/.test(location.hash)) history.replaceState(null, '', '#/orte');
+  if (!location.hash || !/^#\/(orte|d|alle|zuletzt|favoriten|a|einstellungen|suche|fritz)/.test(location.hash)) history.replaceState(null, '', '#/orte');
   await render();
   if (oauth) await finishOAuth(oauth);
   if (connections().length) {
@@ -210,5 +216,6 @@ function movedNotice() {
     await syncStore();
     if (!hadPin && lockEnabled()) await showLockScreen();
     for (const c of connections()) source(c.id).catch(() => {});
+    syncAll().catch(() => {});
   }
 })();
