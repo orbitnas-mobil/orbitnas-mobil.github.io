@@ -1,11 +1,12 @@
 // Offline-Modus: Die App selbst liegt auf dem Gerät. Deine Daten (IndexedDB) fasst dieser Teil nie an.
-const BUILD = "4ab63e617ebf";
+const BUILD = "8de5c59f4181";
 const APP_CACHE = 'orbitnas-app-' + BUILD;
 const THUMBS = 'orbitnas-thumbs';
 const ASSETS = [
   "./",
   "./index.html",
   "./manifest.webmanifest",
+  "./css/addons.css",
   "./css/app.css",
   "./icons/apple-touch-icon.png",
   "./icons/favicon.png",
@@ -35,6 +36,13 @@ const ASSETS = [
   "./js/upload.js",
   "./js/util.js",
   "./js/version.js",
+  "./js/addons/fuel.js",
+  "./js/addons/index.js",
+  "./js/addons/notes.js",
+  "./js/addons/store.js",
+  "./js/addons/trips.js",
+  "./js/addons/ui.js",
+  "./js/addons/vault.js",
   "./js/sources/base.js",
   "./js/sources/demo.js",
   "./js/sources/dropbox.js",

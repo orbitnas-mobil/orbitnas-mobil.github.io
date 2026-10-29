@@ -22,7 +22,7 @@ export function h(tag, attrs, ...children) {
     if (v == null || v === false) continue;
     if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
     else if (k === 'class') el.className += (el.className ? ' ' : '') + v;
-    else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
+    else if (k === 'style' && typeof v === 'object') { for (const [sk, sv] of Object.entries(v)) { if (sk.startsWith('--')) el.style.setProperty(sk, sv); else el.style[sk] = sv; } }
     else if (k === 'html') el.innerHTML = v; // nur für eigene, feste Symbole
     else if (k in el && typeof v !== 'string') el[k] = v;
     else el.setAttribute(k, v === true ? '' : v);
@@ -191,6 +191,9 @@ const P = {
   path: 'M4 4h6v2H6v12h12v-4h2v6H4zm10 0h6v6h-2V7.4l-6.3 6.3-1.4-1.4L16.6 6H14z',
   cloudCheck: 'M7 19a5 5 0 0 1-.8-9.9A6.5 6.5 0 0 1 18.6 8 5.5 5.5 0 0 1 18 19zm3.2-3.6 5.3-5.3-1.4-1.4-3.9 3.9-1.9-1.9-1.4 1.4z',
   clock: 'M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20zm0 2a8 8 0 1 0 0 16 8 8 0 0 0 0-16zm-1 3h2v5.4l3.6 2.1-1 1.7L11 13.6z',
+  fuel: 'M5 3h8a1 1 0 0 1 1 1v7h1a2 2 0 0 1 2 2v4a1 1 0 0 0 2 0V9l-2-2 1.4-1.4 3.1 3.1V17a3 3 0 0 1-6 0v-4h-1v8H4V4a1 1 0 0 1 1-1zm1 2v5h6V5z',
+  note: 'M5 3h14a2 2 0 0 1 2 2v10l-6 6H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm1 4v2h12V7zm0 4v2h12v-2zm0 4v2h6v-2zm10 5 4-4h-4z',
+  plane: 'M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z',
   link: 'M10.6 13.4a1 1 0 0 1 0-1.4l3-3a1 1 0 1 1 1.4 1.4l-3 3a1 1 0 0 1-1.4 0zM8.5 18a3.5 3.5 0 0 1-2.5-6l2-2 1.4 1.4-2 2a1.5 1.5 0 0 0 2.2 2.2l2-2 1.4 1.4-2 2a3.5 3.5 0 0 1-2.5 1zm6.1-4.6-1.4-1.4 2-2a1.5 1.5 0 0 0-2.2-2.2l-2 2L9.6 8.4l2-2a3.5 3.5 0 0 1 5 5z',
 };
 export function icon(name, cls = '') {

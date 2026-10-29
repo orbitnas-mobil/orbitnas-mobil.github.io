@@ -14,6 +14,7 @@ import { openFritz, fritzConfigured } from './fritz.js';
 import { pageHead } from './files.js';
 import { srcColor, setIgnored, errText } from './fileops.js';
 import { APP_VERSION } from './version.js';
+import { ADDONS, getSyncPass, setSyncPass, syncAddon, openAddon } from './addons/store.js';
 
 const group = (title, foot, ...rows) => h('section.group', title ? h('h2.group-title', title) : null, h('div.group-body', rows), foot ? h('p.group-foot', foot) : null);
 const navRow = (ic, color, title, sub, onclick, value = '') => h('button.row', { onclick },
@@ -48,6 +49,7 @@ export async function renderSettings(view, parts = []) {
     st.error ? h('div.row.info', h('span.row-main', h('span.row-title.err-text', 'Fehler'), h('small.row-sub', errText(st.error)))) : null,
     main && main.type !== 'demo' ? actRow('Jetzt abgleichen', async () => { await store.syncStore(); toast(store.status.error ? errText(store.status.error) : 'Abgeglichen', store.status.error ? 'err' : ''); rerender(); }) : null));
 
+  page.append(await addonsGroup(rerender));
   page.append(appearance(rerender));
   page.append(await security(rerender));
 
@@ -165,4 +167,35 @@ async function checkUpdate() {
   if (!reg) { location.reload(); return; }
   await reg.update();
   if (reg.waiting || reg.installing) toast('Neue Version wird geladen …'); else toast('Du hast die neueste Version.');
+}
+
+// Fuel Tracker, Notizen, Reisen, Tresor: Sync-Passwort (dasselbe wie am PC) und Stand je Add-on
+async function addonsGroup(rerender) {
+  const pass = await getSyncPass();
+  const rows = [];
+  for (const a of ADDONS) {
+    const api = await openAddon(a.id), st = api.status();
+    rows.push(navRow(a.icon, a.color, a.title, st.error ? errText(st.error) : st.lastSync ? 'Abgeglichen ' + fmtAgo(st.lastSync) : api.hasData() ? 'Nur auf diesem Gerät' : 'Noch leer', () => go('#/a/' + a.id)));
+  }
+  return group('Orbit-Add-ons (Fuel Tracker, Notizen, Reisen, Tresor)',
+    'Die Daten liegen verschlüsselt in der Haupt-Cloud (Ordner .orbitnas/addons) und werden mit Orbit am PC abgeglichen. Dafür am PC pro Add-on „Online-Abgleich“ einschalten und hier dasselbe Sync-Passwort eintragen. Das Passwort bleibt nur auf diesem Gerät.',
+    infoRow('Sync-Passwort', pass ? 'gesetzt' : 'fehlt'),
+    actRow(pass ? 'Sync-Passwort ändern …' : 'Sync-Passwort eintragen …', async () => {
+      const p = await promptDialog('Dasselbe Passwort wie in Orbit am PC (Einstellungen › Add-on-Optionen).', '', { title: 'Sync-Passwort', ok: 'Speichern' });
+      if (p == null || !p) return;
+      await setSyncPass(p);
+      toast('Gespeichert. Gleiche ab …');
+      const res = await Promise.allSettled(ADDONS.map((a) => syncAddon(a.id)));
+      const bad = res.find((r) => r.status === 'rejected');
+      toast(bad ? errText(bad.reason) : 'Abgeglichen', bad ? 'err' : '');
+      rerender();
+    }),
+    pass ? actRow('Sync-Passwort entfernen', async () => { await setSyncPass(''); rerender(); }, true) : null,
+    pass ? actRow('Jetzt alle abgleichen', async () => {
+      const res = await Promise.allSettled(ADDONS.map((a) => syncAddon(a.id)));
+      const bad = res.find((r) => r.status === 'rejected');
+      toast(bad ? errText(bad.reason) : 'Abgeglichen', bad ? 'err' : '');
+      rerender();
+    }) : null,
+    ...rows);
 }
