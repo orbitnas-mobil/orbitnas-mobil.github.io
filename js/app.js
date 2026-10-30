@@ -20,10 +20,10 @@ import { mountOpsBar } from './opsbar.js';
 import { APP_VERSION } from './version.js';
 
 const TABS = [
-  ['zuletzt', 'Zuletzt', 'clock'],
-  ['orte', 'Durchsuchen', 'folder'],
-  ['favoriten', 'Favoriten', 'star'],
   ['a', 'Orbit', 'grid'],
+  ['orte', 'NAS', 'folder'],
+  ['zuletzt', 'Zuletzt', 'clock'],
+  ['favoriten', 'Favoriten', 'star'],
   ['einstellungen', 'Einstellungen', 'gear'],
 ];
 
@@ -50,14 +50,14 @@ function paintSide() {
     color ? h('span.srcicon.small', { style: { background: color } }, icon(ic)) : icon(ic), h('span', label));
   clear(side).append(
     h('div.side-head', h('img', { src: 'icons/icon-192.png', alt: '' }), h('b', 'Orbit NAS'), lockEnabled() ? h('button.nav-btn', { 'aria-label': 'Sperren', onclick: lockNow }, icon('lock')) : null),
+    item('a', 'Orbit', 'grid', '#/a'),
+    ...ADDONS.map((a) => item('a:' + a.id, a.title, a.icon, '#/a/' + a.id, a.color)),
     item('zuletzt', 'Zuletzt', 'clock', '#/zuletzt'),
-    h('div.side-title', 'Orte'),
+    h('div.side-title', 'NAS'),
     connections().filter((c) => c.type !== 'demo').length > 1 ? item('alle', 'Alle Quellen', 'layers', allHash(), 'var(--accent)') : null,
     ...connections().map((c) => item('d:' + c.id, c.name, c.type === 'demo' ? 'layers' : 'cloud', dirHash(c.id), srcColor(c.id))),
     item('fritz', 'FRITZ!NAS', 'disk', '#/fritz', '#E2001A'),
     h('button.sitem.add', { onclick: () => openAddCloud() }, icon('plus'), h('span', 'Cloud hinzufügen')),
-    h('div.side-title', 'Orbit'),
-    ...ADDONS.map((a) => item('a:' + a.id, a.title, a.icon, '#/a/' + a.id, a.color)),
     favorites().length ? h('div.side-title', 'Favoriten') : null,
     ...favorites().slice(0, 12).map((f) => item(null, f.name, f.isFolder ? 'folder' : 'file', f.isFolder ? dirHash(f.conn, f.path) : dirHash(f.conn, f.path.slice(0, f.path.lastIndexOf('/')) || '/'))),
     h('div.side-title', ''),
@@ -88,7 +88,7 @@ async function render() {
   if (!connections().length) { if (route().parts[0] === 'fritz') { if (!view) shell(); } else { welcome(); return; } }
   if (!view || !document.body.contains(view)) shell();
   const { parts, query } = route();
-  const page = parts[0] || 'orte';
+  const page = parts[0] || 'a';
   const tab = ['d', 'suche', 'fritz', 'alle'].includes(page) ? 'orte' : page;
   root.querySelectorAll('[data-tab]').forEach((el) => el.classList.toggle('on', el.dataset.tab === tab));
   document.documentElement.dataset.page = page;
@@ -207,7 +207,7 @@ function movedNotice() {
   try { oauth = await handleRedirect(); } catch (e) { oauth = { error: e.message + (e.detail ? ` (${e.detail})` : '') }; }
   document.getElementById('splash')?.remove();
   if (connections().length && lockEnabled()) await showLockScreen();
-  if (!location.hash || !/^#\/(orte|d|alle|zuletzt|favoriten|a|einstellungen|suche|fritz)/.test(location.hash)) history.replaceState(null, '', '#/orte');
+  if (!location.hash || !/^#\/(orte|d|alle|zuletzt|favoriten|a|einstellungen|suche|fritz)/.test(location.hash)) history.replaceState(null, '', '#/a');
   await render();
   if (oauth) await finishOAuth(oauth);
   if (connections().length) {
