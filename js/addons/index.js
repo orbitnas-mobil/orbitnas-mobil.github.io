@@ -62,7 +62,7 @@ async function hub(view) {
   const pass = await getSyncPass();
   const subs = new Map();
   const subText = (api) => (api.hasData() ? (api.status().lastSync ? 'Abgeglichen ' + fmtAgo(api.status().lastSync) : 'Nur auf diesem Gerät') : 'Noch leer');
-  const tiles = await Promise.all(ADDONS.map(async (a) => {
+  const tiles = await Promise.all(ADDONS.filter((a) => !a.hidden).map(async (a) => {
     const api = await openAddon(a.id);
     const sub = h('small.muted', subText(api));
     subs.set(a.id, [api, sub]);

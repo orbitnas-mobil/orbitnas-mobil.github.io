@@ -12,6 +12,7 @@ for d, dirs, files in os.walk(root):
             if rel == 'index.html':
                 h.update(open(os.path.join(root, rel), 'rb').read())
             continue
+        if rel.startswith('ocr/'): continue   # Texterkennung (groß): erst beim ersten Scan laden, dann zwischenspeichern
         assets.append('./' + rel)
         h.update(rel.encode()); h.update(open(os.path.join(root, rel), 'rb').read())
 tpl = open(os.path.join(root, 'tools', 'sw.template.js'), encoding='utf-8').read()

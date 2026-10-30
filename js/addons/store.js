@@ -13,6 +13,7 @@ export const ADDONS = [
   { id: 'notes', pc: 'de.dennis.orbit-notes', title: 'Notizen', icon: 'note', color: '#A855F7' },
   { id: 'trips', pc: 'de.dennis.orbit-trips', title: 'Reisen', icon: 'plane', color: '#FF3DCB' },
   { id: 'vault', pc: 'de.dennis.orbit-vault', title: 'Tresor', icon: 'lock', color: '#3DFFA2' },
+  { id: 'scans', pc: 'de.dennis.orbit-scans', title: 'Scans', icon: 'camera', color: '#FFD24A', hidden: true },
 ];
 export const addonById = (id) => ADDONS.find((a) => a.id === id);
 

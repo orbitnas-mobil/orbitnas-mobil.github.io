@@ -1,7 +1,8 @@
 // Offline-Modus: Die App selbst liegt auf dem Gerät. Deine Daten (IndexedDB) fasst dieser Teil nie an.
-const BUILD = "e80b6e4ba7f9";
+const BUILD = "d2257586eaa9";
 const APP_CACHE = 'orbitnas-app-' + BUILD;
 const THUMBS = 'orbitnas-thumbs';
+const OCR_CACHE = 'orbitnas-ocr-1';
 const ASSETS = [
   "./",
   "./index.html",
@@ -43,6 +44,10 @@ const ASSETS = [
   "./js/addons/trips.js",
   "./js/addons/ui.js",
   "./js/addons/vault.js",
+  "./js/scan/ocr.js",
+  "./js/scan/page.js",
+  "./js/scan/pdf.js",
+  "./js/scan/vision.js",
   "./js/sources/base.js",
   "./js/sources/demo.js",
   "./js/sources/dropbox.js",
@@ -91,6 +96,19 @@ self.addEventListener('fetch', (e) => {
   }
 
   if (url.origin !== self.location.origin) return;
+
+  // Texterkennung (ocr/): beim ersten Scan laden und für später (auch offline) behalten
+  if (url.pathname.includes('/ocr/')) {
+    e.respondWith((async () => {
+      const cache = await caches.open(OCR_CACHE);
+      const hit = await cache.match(e.request);
+      if (hit) return hit;
+      const res = await fetch(e.request);
+      if (res.ok) cache.put(e.request, res.clone());
+      return res;
+    })());
+    return;
+  }
 
   // App-Dateien: zuerst vom Gerät (schnell, offline)
   e.respondWith((async () => {

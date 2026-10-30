@@ -8,13 +8,14 @@ import { loadLock, lockEnabled, showLockScreen, lockImmediately } from './lock.j
 import { loadConnections, connections, onConnections, source, addConnection } from './sources/registry.js';
 import { initStore, syncStore, onStore, autoLockMinutes } from './store.js';
 import { handleRedirect } from './sources/oauth.js';
-import { renderBrowse, renderFolder, renderRecent, renderFavorites, renderSearchAll, renderAll, allHash } from './files.js';
+import { renderBrowse, renderFolder, renderRecent, renderSearchAll, renderAll, allHash } from './files.js';
 import { renderSettings } from './settings.js';
 import { renderAddons } from './addons/index.js';
+import { renderScan } from './scan/page.js';
 import { ADDONS, syncAll } from './addons/store.js';
 import { renderFritz } from './fritz.js';
 import { openAddCloud, finishOAuth } from './addcloud.js';
-import { favorites, srcColor } from './fileops.js';
+import { srcColor } from './fileops.js';
 import { isUploading } from './upload.js';
 import { mountOpsBar } from './opsbar.js';
 import { APP_VERSION } from './version.js';
@@ -23,7 +24,7 @@ const TABS = [
   ['a', 'Orbit', 'grid'],
   ['orte', 'NAS', 'folder'],
   ['zuletzt', 'Zuletzt', 'clock'],
-  ['favoriten', 'Favoriten', 'star'],
+  ['scan', 'Scan', 'camera'],
   ['einstellungen', 'Einstellungen', 'gear'],
 ];
 
@@ -41,7 +42,7 @@ function shell() {
   paintSide();
 }
 
-/** Seitenleiste am iPad wie in „Dateien“: Zuletzt, Orte, Favoriten, Einstellungen. */
+/** Seitenleiste am iPad wie in „Dateien“: Orbit, Zuletzt, Scan, Orte, Einstellungen. */
 function paintSide() {
   if (!side) return;
   const { parts } = route();
@@ -51,15 +52,14 @@ function paintSide() {
   clear(side).append(
     h('div.side-head', h('img', { src: 'icons/icon-192.png', alt: '' }), h('b', 'Orbit NAS'), lockEnabled() ? h('button.nav-btn', { 'aria-label': 'Sperren', onclick: lockNow }, icon('lock')) : null),
     item('a', 'Orbit', 'grid', '#/a'),
-    ...ADDONS.map((a) => item('a:' + a.id, a.title, a.icon, '#/a/' + a.id, a.color)),
+    ...ADDONS.filter((a) => !a.hidden).map((a) => item('a:' + a.id, a.title, a.icon, '#/a/' + a.id, a.color)),
     item('zuletzt', 'Zuletzt', 'clock', '#/zuletzt'),
+    item('scan', 'Scan', 'camera', '#/scan'),
     h('div.side-title', 'NAS'),
     connections().filter((c) => c.type !== 'demo').length > 1 ? item('alle', 'Alle Quellen', 'layers', allHash(), 'var(--accent)') : null,
     ...connections().map((c) => item('d:' + c.id, c.name, c.type === 'demo' ? 'layers' : 'cloud', dirHash(c.id), srcColor(c.id))),
     item('fritz', 'FRITZ!NAS', 'disk', '#/fritz', '#E2001A'),
     h('button.sitem.add', { onclick: () => openAddCloud() }, icon('plus'), h('span', 'Cloud hinzufügen')),
-    favorites().length ? h('div.side-title', 'Favoriten') : null,
-    ...favorites().slice(0, 12).map((f) => item(null, f.name, f.isFolder ? 'folder' : 'file', f.isFolder ? dirHash(f.conn, f.path) : dirHash(f.conn, f.path.slice(0, f.path.lastIndexOf('/')) || '/'))),
     h('div.side-title', ''),
     item('einstellungen', 'Einstellungen', 'gear', '#/einstellungen'),
     h('div.side-foot', 'Version ' + APP_VERSION));
@@ -99,7 +99,7 @@ async function render() {
     else if (page === 'alle') await renderAll(view, parts[1] ? '/' + parts[1] : '/');
     else if (page === 'orte') { view.scrollTop = 0; await renderBrowse(view); }
     else if (page === 'zuletzt') { view.scrollTop = 0; await renderRecent(view); }
-    else if (page === 'favoriten') { view.scrollTop = 0; await renderFavorites(view); }
+    else if (page === 'scan') { view.scrollTop = 0; await renderScan(view); }
     else if (page === 'suche') await renderSearchAll(view, query.get('q') || '');
     else if (page === 'a') await renderAddons(view, parts);
     else if (page === 'fritz') { view.scrollTop = 0; await renderFritz(view); }
@@ -210,7 +210,7 @@ function movedNotice() {
   // Beim Kaltstart der App (neue Sitzung) immer in den Orbit-Reiter, auch wenn das Home-Bildschirm-Symbol noch die alte Startadresse (#/orte) gespeichert hat
   let fresh = false;
   try { fresh = !sessionStorage.getItem('started'); sessionStorage.setItem('started', '1'); } catch { /* Safari privat */ }
-  if (!location.hash || (fresh && isStandalone() && !/^#\/(einstellungen)/.test(location.hash) && !oauth) || !/^#\/(orte|d|alle|zuletzt|favoriten|a|einstellungen|suche|fritz)/.test(location.hash)) history.replaceState(null, '', '#/a');
+  if (!location.hash || (fresh && isStandalone() && !/^#\/(einstellungen)/.test(location.hash) && !oauth) || !/^#\/(orte|d|alle|zuletzt|scan|a|einstellungen|suche|fritz)/.test(location.hash)) history.replaceState(null, '', '#/a');
   await render();
   if (oauth) await finishOAuth(oauth);
   if (connections().length) {
