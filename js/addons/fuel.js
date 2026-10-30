@@ -186,20 +186,27 @@ export async function render(el, api, nav) {
       fields: [
         { key: 'vehicle', label: 'Fahrzeug', type: 'select', options: names, value: defV },
         { key: 'date', label: 'Datum', type: 'date', value: e ? e.date : today() },
-        { key: 'amount', label: 'Menge', type: 'number', value: e ? String(e.amount).replace('.', ',') : '', placeholder: 'Liter oder kWh', hint: 'Liter bei Kraftstoff, kWh bei Strom' },
+        { key: 'amount', label: 'Menge (kWh)', type: 'number', value: e ? String(e.amount).replace('.', ',') : '', show: (v) => kindOf(v.vehicle) === 'strom' },
+        { key: 'amountL', label: 'Menge (Liter)', type: 'number', value: e ? String(e.amount).replace('.', ',') : '', show: (v) => kindOf(v.vehicle) !== 'strom' },
         { key: 'price', label: 'Preis (Cent pro kWh)', type: 'number', value: priceCent || (e ? '' : String(pref('fuelPrice')).replace('.', ',')), show: (v) => kindOf(v.vehicle) === 'strom' },
+        { key: 'lprice', label: 'Preis (€ pro Liter)', type: 'number', value: e && kindOf(vName(e.vehicle)) !== 'strom' && num(e.amount) > 0 ? fmt(num(e.cost) / num(e.amount), 3) : '', hint: 'Preis pro Liter oder Kosten gesamt eingeben', show: (v) => kindOf(v.vehicle) !== 'strom' },
         { key: 'cost', label: 'Kosten gesamt (€)', type: 'number', value: e && kindOf(vName(e.vehicle)) !== 'strom' ? String(e.cost).replace('.', ',') : '', show: (v) => kindOf(v.vehicle) !== 'strom' },
         { key: 'notes', label: 'Notiz', type: 'text', value: e?.notes || '' },
       ],
       onSubmit: async (v) => {
         const veh = vehicles.find((x) => x.name === v.vehicle);
         if (!veh) return 'Bitte ein Fahrzeug wählen.';
-        const amount = parseNum(v.amount);
+        const amount = parseNum(veh.kind === 'strom' ? v.amount : v.amountL);
         if (amount == null || amount <= 0) return 'Bitte eine Menge eingeben.';
         if (!validDate(v.date)) return 'Bitte ein Datum wählen.';
         let cost;
         if (veh.kind === 'strom') { const p = parseNum(v.price); if (p == null) return 'Bitte den Preis in Cent pro kWh eingeben.'; cost = Math.round(p * amount) / 100; }
-        else { cost = parseNum(v.cost); if (cost == null) return 'Bitte die Kosten eingeben.'; }
+        else {
+          cost = parseNum(v.cost);
+          const lp = parseNum(v.lprice);
+          if (cost == null && lp != null) cost = Math.round(lp * amount * 100) / 100;
+          if (cost == null) return 'Bitte Literpreis oder Kosten eingeben.';
+        }
         const rec = { id: e?.id || newId(), vehicle: veh.id, date: v.date, amount, cost, notes: v.notes.trim() };
         await save('entries', e ? entries.map((x) => (x.id === e.id ? { ...x, ...rec } : x)) : [...entries, rec]);
         toast(`Eintrag gespeichert (${eur(cost)}).`);
