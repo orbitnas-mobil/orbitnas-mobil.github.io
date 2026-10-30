@@ -4,7 +4,7 @@
   "description": "Deine Dateien aus pCloud, OneDrive, Google Drive, Dropbox und von der FRITZ!NAS",
   "lang": "de",
   "id": "./",
-  "start_url": "./#/orte",
+  "start_url": "./#/a",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",
