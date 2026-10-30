@@ -149,9 +149,9 @@ export async function openAddon(id) {
       a.rev++; a.lastEdit = Date.now();
       await persist(a);
       emit(id, 'data');
-      scheduleSync(id, 1500);
+      scheduleSync(id, 600);
     },
-    async remove(key) { delete a.data[key]; a.rev++; a.lastEdit = Date.now(); await persist(a); emit(id, 'data'); scheduleSync(id, 1500); },
+    async remove(key) { delete a.data[key]; a.rev++; a.lastEdit = Date.now(); await persist(a); emit(id, 'data'); scheduleSync(id, 600); },
     status: () => ({ lastSync: a.lastSync, error: a.error, busy: a.busy, readOnly: a.readOnly, conflicts: a.conflicts.length }),
     hasData: () => Object.keys(a.data).length > 0,
     internal: a,
@@ -251,8 +251,12 @@ export async function overwriteCloudFromHere() {
 
 export function scheduleSync(id, ms = 3000) {
   clearTimeout(timers.get(id));
-  timers.set(id, setTimeout(() => syncAddon(id).catch(() => {}), ms));
+  timers.set(id, setTimeout(() => { timers.delete(id); syncAddon(id).catch(() => {}); }, ms));
 }
+/** Wartende Änderungen sofort hochladen (z. B. wenn die App in den Hintergrund geht – iOS hält dann Zeitgeber an). */
+function flushPending() { for (const [id, t] of [...timers]) { clearTimeout(t); timers.delete(id); syncAddon(id).catch(() => {}); } }
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushPending(); });
+window.addEventListener('pagehide', flushPending);
 
 /** Gleicht ein Add-on ab. Gibt { skipped } zurück, wenn kein Sync-Passwort oder keine Cloud da ist. */
 export function syncAddon(id) {
