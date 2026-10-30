@@ -14,7 +14,7 @@ import { openFritz, fritzConfigured } from './fritz.js';
 import { pageHead } from './files.js';
 import { srcColor, setIgnored, errText } from './fileops.js';
 import { APP_VERSION } from './version.js';
-import { ADDONS, getSyncPass, setSyncPass, syncAddon, openAddon } from './addons/store.js';
+import { ADDONS, getSyncPass, setSyncPass, syncAddon, openAddon, importExportZip } from './addons/store.js';
 
 const group = (title, foot, ...rows) => h('section.group', title ? h('h2.group-title', title) : null, h('div.group-body', rows), foot ? h('p.group-foot', foot) : null);
 const navRow = (ic, color, title, sub, onclick, value = '') => h('button.row', { onclick },
@@ -189,6 +189,19 @@ async function addonsGroup(rerender) {
       const bad = res.find((r) => r.status === 'rejected');
       toast(bad ? errText(bad.reason) : 'Abgeglichen', bad ? 'err' : '');
       rerender();
+    }),
+    actRow('Daten aus Orbit-Export importieren …', () => {
+      const inp = h('input', { type: 'file', multiple: true, accept: '.zip,application/zip', hidden: true });
+      inp.addEventListener('change', async () => {
+        const msgs = [];
+        for (const f of inp.files) {
+          try { const r = await importExportZip(f); msgs.push(`${r.addon.title}: ${r.added} neu`); } catch (e) { msgs.push(errText(e)); }
+        }
+        inp.remove();
+        toast(msgs.join(' · ') || 'Nichts gewählt', msgs.some((m) => /gehört|fehlt|beschädigt|Unbekannt|JSON/.test(m)) ? 'err' : '');
+        rerender();
+      });
+      document.body.append(inp); inp.click();
     }),
     pass ? actRow('Sync-Passwort entfernen', async () => { await setSyncPass(''); rerender(); }, true) : null,
     pass ? actRow('Jetzt alle abgleichen', async () => {

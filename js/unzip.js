@@ -5,7 +5,7 @@ const u16 = (v, o) => v.getUint16(o, true);
 const u32 = (v, o) => v.getUint32(o, true);
 const u64 = (v, o) => u32(v, o) + u32(v, o + 4) * 0x100000000;
 
-export async function firstFileFromZip(bytes) {
+export async function firstFileFromZip(bytes, want = null) {
   const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   // Ende des Inhaltsverzeichnisses suchen
   let eocd = -1;
@@ -42,7 +42,7 @@ export async function firstFileFromZip(bytes) {
       e += 4 + len;
     }
     p = eEnd + commentLen;
-    if (name.endsWith('/')) continue;
+    if (name.endsWith('/') || (want && name !== want)) continue;
     if (u32(v, local) !== 0x04034b50) throw new Error('Die Datei von pCloud ist beschädigt.');
     const start = local + 30 + u16(v, local + 26) + u16(v, local + 28);
     const data = bytes.subarray(start, start + comp);
@@ -53,5 +53,5 @@ export async function firstFileFromZip(bytes) {
     }
     throw new Error('Unbekanntes ZIP-Format (' + method + ').');
   }
-  throw new Error('Die ZIP-Datei von pCloud ist leer.');
+  throw new Error(want ? `In der ZIP-Datei fehlt ${want}.` : 'Die ZIP-Datei von pCloud ist leer.');
 }

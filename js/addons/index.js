@@ -71,6 +71,8 @@ async function hub(view) {
   clear(view).append(h('div.page.ios.ad-page',
     ...head('Orbit'),
     h('div.ad-tiles', tiles),
+    h('section.ad-card', h('b', 'Alte Daten übernehmen'), h('p.muted', 'Export-Dateien aus dem alten Orbit (Daten-Fuel-Tracker.zip, Daten-Notizen.zip, Daten-Reisen.zip) einlesen.'),
+      h('button.btn', { onclick: () => go('#/einstellungen') }, 'Einstellungen › Daten aus Orbit-Export importieren')),
     !pass ? h('section.ad-card', h('b', 'Daten mit dem PC abgleichen'),
       h('p.muted', 'Am PC in Orbit unter Einstellungen › Add-on-Optionen bei jedem Add-on „Online-Abgleich“ einschalten und ein Sync-Passwort wählen. Hier dasselbe Passwort eintragen.'),
       h('button.btn.primary', { onclick: () => go('#/einstellungen') }, 'Zu den Einstellungen')) : null));

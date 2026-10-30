@@ -271,3 +271,31 @@ export async function syncAll() {
 }
 
 setInterval(() => { if (document.visibilityState === 'visible' && /^#\/a\//.test(location.hash)) { const id = location.hash.split('/')[2]; if (addonById(id)) syncAddon(id).catch(() => {}); } }, 120000);
+
+// ---------------------------------------------------------------- Import aus dem Orbit-Export (Daten-*.zip)
+
+/** Liest eine Export-ZIP (meta.json + speicher.json), ordnet sie dem Add-on zu und ergänzt die Daten (nichts wird überschrieben). */
+export async function importExportZip(file) {
+  const { firstFileFromZip } = await import('../unzip.js');
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const dec = (u8) => JSON.parse(new TextDecoder().decode(u8).replace(/^\uFEFF/, ''));
+  const meta = dec(await firstFileFromZip(bytes, 'meta.json'));
+  const speicher = dec(await firstFileFromZip(bytes, 'speicher.json'));
+  const addon = ADDONS.find((a) => a.pc === meta.id);
+  if (!addon) throw new Error(`„${file.name}“ gehört zu keinem Add-on dieser App (${meta.name || meta.id}).`);
+  const api = await openAddon(addon.id);
+  let added = 0;
+  for (const [k, v] of Object.entries(speicher)) {
+    if (k === 'dataVersion') continue;
+    const cur = api.raw(k);
+    if (cur == null) { await api.set(k, v); added += parseList(v)?.length ?? 1; continue; }
+    const l = parseList(cur), r = parseList(v);
+    if (l && r) {
+      const have = new Set(l.map((e) => String(e.id)));
+      const extra = r.filter((e) => !have.has(String(e.id)));
+      if (extra.length) { await api.set(k, js([...l, ...extra])); added += extra.length; }
+    }
+  }
+  scheduleSync(addon.id, 500);
+  return { addon, added };
+}
