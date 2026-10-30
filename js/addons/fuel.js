@@ -10,6 +10,12 @@ const DEFAULTS = [
   { id: 'tesla_model3', name: 'Tesla Model 3', kind: 'strom', consumption: 15, archived: false },
 ];
 
+/** Standardfahrzeuge (BMW, Tesla) fest in den Speicher schreiben, damit ein „Schnitt“ sie mitnimmt. */
+export async function materialize(api) {
+  const { vehicles } = load(api);
+  if (vehicles.length) await api.set('vehicles', vehicles);
+}
+
 const state = { period: 'Alle', moreEntries: false, moreCosts: false, calc: { cents: '35', ev: '15', diesel: '2,20', dcons: '5,5' } };
 
 function load(api) {
@@ -27,6 +33,19 @@ function load(api) {
   return { vehicles, entries, costs };
 }
 
+// Fahrzeugfarben wie am PC: gewählte Farbe, sonst die erste noch freie (keine doppelt vergeben)
+const VPAL = ['#00D4FF', '#A855F7', '#FF3DCB', '#3DFFA2', '#FFD24A', '#FF8A3D', '#FF5C7A', '#94A3B8'];
+const VNAMES = { Automatisch: '', Blau: '#00D4FF', Lila: '#A855F7', Pink: '#FF3DCB', 'Grün': '#3DFFA2', Gelb: '#FFD24A', Orange: '#FF8A3D', Rot: '#FF5C7A', Grau: '#94A3B8' };
+const colorName = (hex) => Object.keys(VNAMES).find((k) => VNAMES[k].toUpperCase() === String(hex || '').toUpperCase()) || 'Automatisch';
+function colorMap(list) {
+  const used = new Set(list.filter((v) => v.color).map((v) => String(v.color).toUpperCase())), out = new Map();
+  list.forEach((v, i) => {
+    if (v.color) { out.set(v.id, v.color); return; }
+    const c = VPAL.find((x) => !used.has(x)) || VPAL[i % VPAL.length];
+    used.add(c); out.set(v.id, c);
+  });
+  return out;
+}
 const unitOf = (v) => (v.kind === 'strom' ? 'kWh' : 'l');
 const inPeriod = (list) => (state.period === 'Alle' ? list : list.filter((x) => String(x.date || '').startsWith(state.period)));
 
@@ -48,7 +67,8 @@ export async function render(el, api, nav) {
   const ents = inPeriod(entries), cts = inPeriod(costs);
   const years = [...new Set([...entries, ...costs].map((x) => String(x.date || '').slice(0, 4)).filter((y) => /^\d{4}$/.test(y)))].sort().reverse();
   const st = new Map(act.map((v) => [v.id, stats(v, ents, cts)]));
-  const colorOf = (v) => PALETTE[Math.max(0, act.indexOf(v)) % PALETTE.length];
+  const cmap = colorMap(act), vcol = colorMap(vehicles);
+  const colorOf = (v) => cmap.get(v.id) || PALETTE[0];
   const vName = (id) => vehicles.find((v) => v.id === id)?.name || id;
 
   const page = h('div.ad-page');
@@ -147,7 +167,7 @@ export async function render(el, api, nav) {
   // Fahrzeuge
   page.append(collapse('Fahrzeuge', false,
     h('div.ad-list', vehicles.map((v) => h('button.ad-item', { onclick: () => vehMenu(v) },
-      h('span.ad-i-main', h('b', v.name), h('small.muted', `${v.kind === 'strom' ? 'Strom (kWh)' : 'Kraftstoff (Liter)'} · ${fmt(v.consumption, 1)} /100 km${v.archived ? ' · archiviert' : ''}`)), icon('chevron', 'chev')))),
+      h('span.ad-i-main', h('b', h('i', { style: { display: 'inline-block', width: '10px', height: '10px', borderRadius: '50%', marginRight: '8px', background: vcol.get(v.id) || '#888' } }), v.name), h('small.muted', `${v.kind === 'strom' ? 'Strom (kWh)' : 'Kraftstoff (Liter)'} · ${fmt(v.consumption, 1)} /100 km${v.archived ? ' · archiviert' : ''}`)), icon('chevron', 'chev')))),
     h('button.btn.small', { onclick: () => vehForm() }, icon('plus'), ' Fahrzeug hinzufügen')));
 
   el.append(page);
@@ -226,12 +246,18 @@ export async function render(el, api, nav) {
         { key: 'name', label: 'Name', type: 'text', value: v?.name || '' },
         { key: 'kind', label: 'Art', type: 'select', options: [{ value: 'strom', label: 'Strom (kWh)' }, { value: 'diesel', label: 'Kraftstoff (Liter)' }], value: v?.kind || 'strom' },
         { key: 'cons', label: 'Verbrauch pro 100 km', type: 'number', value: v ? String(v.consumption).replace('.', ',') : '' },
+        { key: 'color', label: 'Farbe', type: 'select', options: Object.keys(VNAMES), value: v ? colorName(v.color) : 'Automatisch' },
       ],
       onSubmit: async (f) => {
         const name = f.name.trim(); const cons = parseNum(f.cons);
         if (!name || cons == null || cons <= 0) return 'Bitte Name und Verbrauch angeben.';
         if (vehicles.some((x) => x.name.toLowerCase() === name.toLowerCase() && x.id !== v?.id)) return 'Diesen Namen gibt es schon.';
-        const rec = { id: v?.id || newId(), name, kind: f.kind, consumption: cons, archived: v ? !!v.archived : false };
+        if (v) {
+          if (!(await confirmDialog(`Änderungen an „${v.name}“ speichern – sind Sie sicher?`, { title: 'Bitte bestätigen', ok: 'Ja' }))) return 'Abgebrochen.';
+          if (!(await confirmDialog('Wirklich sicher?', { title: 'Zweite Bestätigung', ok: 'Ja, speichern' }))) return 'Abgebrochen.';
+        }
+        const color = VNAMES[f.color] || (v ? '' : (VPAL.find((c) => !vehicles.some((x) => String(x.color).toUpperCase() === c)) || ''));
+        const rec = { id: v?.id || newId(), name, kind: f.kind, consumption: cons, archived: v ? !!v.archived : false, color };
         await save('vehicles', v ? vehicles.map((x) => (x.id === v.id ? { ...x, ...rec } : x)) : [...vehicles, rec]);
       },
     });
@@ -241,7 +267,8 @@ export async function render(el, api, nav) {
       { label: 'Bearbeiten', icon: 'edit', onclick: () => vehForm(v) },
       { label: v.archived ? 'Wieder aktivieren' : 'Archivieren', hint: v.archived ? '' : 'Blendet es aus, Daten bleiben', icon: 'folder', onclick: () => save('vehicles', vehicles.map((x) => (x.id === v.id ? { ...x, archived: !x.archived } : x))) },
       { label: 'Endgültig löschen', hint: 'Mit allen Einträgen und Zusatzkosten', icon: 'trash', danger: true, onclick: async () => {
-        if (!(await confirmDialog(`„${v.name}“ mit allen Einträgen und Zusatzkosten endgültig löschen?`, { danger: true, ok: 'Löschen' }))) return;
+        if (!(await confirmDialog(`„${v.name}“ mit allen Einträgen und Zusatzkosten endgültig löschen – sind Sie sicher?`, { danger: true, title: 'Bitte bestätigen', ok: 'Ja' }))) return;
+        if (!(await confirmDialog('Wirklich sicher? Das lässt sich nicht rückgängig machen.', { danger: true, title: 'Zweite Bestätigung', ok: 'Ja, endgültig löschen' }))) return;
         await save('entries', entries.filter((x) => x.vehicle !== v.id)); await save('costs', costs.filter((x) => x.vehicle !== v.id)); await save('vehicles', vehicles.filter((x) => x.id !== v.id));
       } },
     ]);

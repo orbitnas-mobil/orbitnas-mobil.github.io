@@ -223,6 +223,32 @@ export async function resetCloudSync() {
   return n;
 }
 
+/** „Schnitt“: den Stand dieses Geräts als alleinigen Stand in die Cloud schreiben (ersetzt die Cloud-Dateien, kein Zusammenführen).
+ *  Die bisherige Cloud-Datei bleibt in „zurueckgesetzt“ erhalten. Gibt die Zahl überschriebener Add-ons zurück. */
+export async function overwriteCloudFromHere() {
+  const pass = await getSyncPass();
+  if (!pass) throw new SyncError('Bitte zuerst ein Sync-Passwort eintragen.');
+  const src = await mainSrc();
+  if (!src) throw new SyncError('Keine Haupt-Cloud angemeldet.');
+  let n = 0;
+  for (const meta of ADDONS) {
+    const api = await openAddon(meta.id), a = api.internal;
+    if (meta.id === 'fuel') { try { await (await import('./fuel.js')).materialize(api); } catch { /* egal */ } }
+    if (!Object.keys(a.data).length) continue;
+    await ensureDirs(src, meta.pc);
+    const old = await src.readText(remoteFile(meta.pc));
+    if (old != null) {
+      const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+      await src.writeText(remoteDir(meta.pc) + '/zurueckgesetzt/' + stamp + '.orbit', old);
+    }
+    await src.writeText(remoteFile(meta.pc), await encryptSync(pass, js({ speicher: a.data }), devName()));
+    a.base = { ...a.data }; a.lastSync = Date.now(); a.error = null;
+    await persist(a); emit(meta.id, 'status');
+    n++;
+  }
+  return n;
+}
+
 export function scheduleSync(id, ms = 3000) {
   clearTimeout(timers.get(id));
   timers.set(id, setTimeout(() => syncAddon(id).catch(() => {}), ms));
