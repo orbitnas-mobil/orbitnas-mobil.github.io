@@ -1,6 +1,7 @@
 // Notizen: Titel, Inhalt, Farbe, Fälligkeit, anheften, erledigen, gelöscht (wiederherstellbar). Daten wie am PC: notes.
 
 import { h, icon, toast, actionSheet, confirmDialog } from '../util.js';
+import { pref } from './prefs.js';
 import { head, formSheet, deDate, shortDate, validDate, newId, today } from './ui.js';
 
 const COLORS = { Indigo: '#6366F1', Lila: '#A855F7', 'Grün': '#10B981', Gelb: '#F59E0B', Rosa: '#F43F5E', Blau: '#0EA5E9' };
@@ -39,7 +40,7 @@ export async function render(el, api, nav) {
         { key: 'title', label: 'Titel', type: 'text', value: n?.title || '' },
         { key: 'content', label: 'Inhalt', type: 'textarea', value: n?.content || '', rows: 6 },
         { key: 'due', label: 'Fälligkeitsdatum (optional)', type: 'date', value: shortDate(n?.due_date) },
-        { key: 'color', label: 'Farbe', type: 'select', options: Object.keys(COLORS), value: n?.color || 'Indigo' },
+        { key: 'color', label: 'Farbe', type: 'select', options: Object.keys(COLORS), value: n?.color || pref('notesColor') },
         { key: 'pinned', label: 'Oben anheften', type: 'check', value: !!n?.pinned },
       ],
       ok: n ? 'Speichern' : 'Erstellen',

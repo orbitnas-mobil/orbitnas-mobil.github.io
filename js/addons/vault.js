@@ -4,10 +4,13 @@
 import { h, icon, toast, actionSheet, confirmDialog, sheet } from '../util.js';
 import { head, formSheet, newId } from './ui.js';
 import { syncAddon } from './store.js';
+import { pref } from './prefs.js';
+import { checkFaceId, lock } from '../lock.js';
+import { saveSecret, loadSecret, deleteSecret } from '../secrets.js';
 
 const CATS = ['Allgemein', 'Finanzen', 'Streaming', 'Arbeit', 'Online', 'Bank', 'E-Mail', 'Sonstiges'];
 const ITER = 200000;
-const IDLE_MS = 3 * 60000;           // wie am PC: nach 3 Minuten ohne Bedienung sperren
+const idleMs = () => Math.max(1, Number(pref('vaultMinutes')) || 3) * 60000;   // wie am PC: standardmäßig nach 3 Minuten ohne Bedienung sperren
 const AWAY_MS = 60000;               // App im Hintergrund: nach 1 Minute sperren
 
 const b64 = (u8) => { let s = ''; for (const b of u8) s += String.fromCharCode(b); return btoa(s); };
@@ -75,7 +78,7 @@ export async function render(el, api, nav) {
   if (fresh == null) { lockNow(); return lockedView(); }
   S.entries = fresh;
   touch();
-  if (!S.timer) S.timer = setInterval(() => { if (S.keys && Date.now() - S.last > IDLE_MS) { lockNow(); window.dispatchEvent(new Event('orbit-vault-lock')); } }, 15000);
+  if (!S.timer) S.timer = setInterval(() => { if (S.keys && Date.now() - S.last > idleMs()) { lockNow(); window.dispatchEvent(new Event('orbit-vault-lock')); } }, 15000);
   page.addEventListener('pointerdown', touch); page.addEventListener('keydown', touch);
   return listView();
 
@@ -105,22 +108,40 @@ export async function render(el, api, nav) {
   function lockedView() {
     const pw = h('input.input', { type: 'password', placeholder: 'Master-Passwort', autocomplete: 'current-password', enterkeyhint: 'go' });
     const msg = h('p.err-text', { hidden: true });
+    const fail = (t) => { msg.textContent = t; msg.hidden = false; };
+    async function open(password, viaFace) {
+      msg.hidden = true;
+      const keys = await deriveKeys(password, unb64(hdr.salt), Number(hdr.iter) || ITER);
+      const list = hdr.ct ? await decryptVault(keys, hdr) : [];
+      if (list == null) {
+        if (viaFace) { await deleteSecret('vaultPw'); fail('Das Master-Passwort hat sich geändert. Bitte einmal von Hand eingeben.'); } else { fail('Falsches Master-Passwort.'); pw.select(); }
+        return false;
+      }
+      if (pref('vaultFace') && lock.faceId && !viaFace) { try { await saveSecret('vaultPw', { pw: password }); } catch { /* egal */ } }
+      S.keys = keys; S.salt = hdr.salt; S.entries = list; touch();
+      nav.redraw();
+      return true;
+    }
+    const face = async () => {
+      try {
+        if (!(await checkFaceId())) return;
+        const s = await loadSecret('vaultPw');
+        if (!s?.pw) { fail('Beim ersten Mal das Master-Passwort von Hand eingeben, danach geht es mit Face ID.'); return; }
+        await open(s.pw, true);
+      } catch (e) { if (e.name !== 'NotAllowedError') fail('Face ID: ' + (e.message || e)); }
+    };
+    const faceOn = pref('vaultFace') && !!lock.faceId;
     page.append(h('form.ad-lock', {
       onsubmit: async (e) => {
         e.preventDefault();
         if (!pw.value) return;
-        msg.hidden = true;
         const btn = e.target.querySelector('button[type=submit]'); btn.disabled = true;
-        try {
-          const keys = await deriveKeys(pw.value, unb64(hdr.salt), Number(hdr.iter) || ITER);
-          const list = hdr.ct ? await decryptVault(keys, hdr) : [];
-          if (list == null) { msg.textContent = 'Falsches Master-Passwort.'; msg.hidden = false; pw.select(); return; }
-          S.keys = keys; S.salt = hdr.salt; S.entries = list; touch();
-          nav.redraw();
-        } finally { btn.disabled = false; }
+        try { await open(pw.value, false); } finally { btn.disabled = false; }
       },
-    }, icon('lock', 'big'), h('h2', 'Tresor gesperrt'), pw, msg, h('button.btn.primary.big.block', { type: 'submit' }, 'Entsperren')));
-    setTimeout(() => pw.focus(), 300);
+    }, icon('lock', 'big'), h('h2', 'Tresor gesperrt'),
+    faceOn ? h('button.btn.primary.big.block', { type: 'button', onclick: face }, icon('face'), ' Mit Face ID entsperren') : null,
+    pw, msg, h('button.btn' + (faceOn ? '' : '.primary') + '.big.block', { type: 'submit' }, 'Mit Passwort entsperren')));
+    if (faceOn) { loadSecret('vaultPw').then((s) => { if (s?.pw) setTimeout(face, 350); }); } else setTimeout(() => pw.focus(), 300);
   }
 
   // ------------------------------------------------------------ Liste
