@@ -199,6 +199,30 @@ async function ensureDirs(src, pc) {
   }
 }
 
+/** Passwort vergessen: verschlüsselte Cloud-Dateien aller Add-ons beiseitelegen (bleiben in „zurueckgesetzt“ erhalten), Passwort vergessen.
+ *  Lokale Daten bleiben unverändert und gehen mit dem neuen Passwort wieder hoch. Gibt die Zahl beiseitegelegter Dateien zurück. */
+export async function resetCloudSync() {
+  const src = await mainSrc();
+  if (!src) throw new SyncError('Keine Haupt-Cloud angemeldet.');
+  let n = 0;
+  for (const meta of ADDONS) {
+    const text = await src.readText(remoteFile(meta.pc));
+    if (text != null) {
+      const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+      await src.writeText(remoteDir(meta.pc) + '/zurueckgesetzt/' + stamp + '.orbit', text);
+      const it = (await src.list(remoteDir(meta.pc))).find((x) => x.name === 'daten.orbit');
+      if (it) await src.remove(it);
+      n++;
+    }
+    const api = await openAddon(meta.id), a = api.internal;
+    a.base = null; a.lastSync = null; a.error = null;
+    await persist(a);
+    emit(meta.id, 'status');
+  }
+  await setSyncPass('');
+  return n;
+}
+
 export function scheduleSync(id, ms = 3000) {
   clearTimeout(timers.get(id));
   timers.set(id, setTimeout(() => syncAddon(id).catch(() => {}), ms));

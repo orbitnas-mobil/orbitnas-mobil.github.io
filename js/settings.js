@@ -17,7 +17,7 @@ import { APP_VERSION } from './version.js';
 import { loadPrefs, pref, setPrefs } from './addons/prefs.js';
 import { formSheet, parseNum } from './addons/ui.js';
 import { deleteSecret } from './secrets.js';
-import { ADDONS, getSyncPass, setSyncPass, syncAddon, openAddon, importExportZip } from './addons/store.js';
+import { ADDONS, resetCloudSync, getSyncPass, setSyncPass, syncAddon, openAddon, importExportZip } from './addons/store.js';
 
 const group = (title, foot, ...rows) => h('section.group', title ? h('h2.group-title', title) : null, h('div.group-body', rows), foot ? h('p.group-foot', foot) : null);
 const navRow = (ic, color, title, sub, onclick, value = '') => h('button.row', { onclick },
@@ -207,6 +207,18 @@ async function addonsGroup(rerender) {
       });
       document.body.append(inp); inp.click();
     }),
+    actRow('Passwort vergessen – Abgleich zurücksetzen …', async () => {
+      if (!(await confirmDialog('Die verschlüsselten Abgleichdateien aller Add-ons in der Cloud (Ordner .orbitnas/addons) werden beiseitegelegt – ohne das alte Passwort kann sie niemand lesen. Deine Daten auf diesem Gerät bleiben und werden mit einem neuen Sync-Passwort wieder hochgeladen. Daten, die nur am PC liegen, kommen erst zurück, wenn du dort ebenfalls zurücksetzt und dasselbe neue Passwort einträgst.', { title: 'Abgleich zurücksetzen?', danger: true, ok: 'Zurücksetzen' }))) return;
+      try { await resetCloudSync(); } catch (e) { toast('Zurücksetzen nicht möglich: ' + errText(e), 'err'); rerender(); return; }
+      const p = await promptDialog('Neues Sync-Passwort (dasselbe wie am PC nach dem Zurücksetzen dort).', '', { title: 'Neues Sync-Passwort', ok: 'Speichern' });
+      if (p) {
+        await setSyncPass(p);
+        const res = await Promise.allSettled(ADDONS.map((a) => syncAddon(a.id)));
+        const bad = res.find((r) => r.status === 'rejected');
+        toast(bad ? errText(bad.reason) : 'Zurückgesetzt und neu abgeglichen', bad ? 'err' : '');
+      } else toast('Zurückgesetzt. Ohne neues Passwort ruht der Abgleich.');
+      rerender();
+    }, true),
     pass ? actRow('Sync-Passwort entfernen', async () => { await setSyncPass(''); rerender(); }, true) : null,
     pass ? actRow('Jetzt alle abgleichen', async () => {
       const res = await Promise.allSettled(ADDONS.map((a) => syncAddon(a.id)));
