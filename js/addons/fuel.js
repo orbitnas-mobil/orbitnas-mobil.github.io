@@ -19,7 +19,8 @@ export async function materialize(api) {
 const state = { period: 'Alle', moreEntries: false, moreCosts: false, calc: { cents: '35', ev: '15', diesel: '2,20', dcons: '5,5' } };
 
 function load(api) {
-  const vehicles = api.get('vehicles', []);
+  // Datensätze ohne Namen (Geisterfahrzeuge aus leeren Einträgen) gehören nirgends hin: ausblenden, damit BMW und Tesla wieder vorgeschlagen werden
+  const vehicles = api.get('vehicles', []).filter((v) => v && typeof v === 'object' && String(v.name || '').trim());
   const entries = api.get('entries', []);
   const costs = api.get('costs', []);
   // Standard-Fahrzeuge wie am PC: wenn die Liste leer ist oder Einträge sich auf sie beziehen
