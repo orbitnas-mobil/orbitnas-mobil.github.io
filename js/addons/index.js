@@ -2,7 +2,7 @@
 
 import { h, icon, clear, fmtAgo, toast } from '../util.js';
 import { go } from '../ui.js';
-import { ADDONS, addonById, openAddon, syncAddon, onAddon, getSyncPass } from './store.js';
+import { ADDONS, addonById, openAddon, syncAddon, syncByHand, onAddon, getSyncPass } from './store.js';
 import { head } from './ui.js';
 import { loadPrefs, animated } from './prefs.js';
 import { errText } from '../fileops.js';
@@ -37,8 +37,8 @@ export async function renderAddons(view, parts) {
     clear(footer);
     if (!pass) footer.append(h('span', 'Nur auf diesem Gerät. '), h('button.link', { onclick: () => go('#/einstellungen') }, 'Abgleich mit dem PC einrichten'));
     else if (st.busy) footer.append(h('span', 'Gleicht ab …'));
-    else if (st.error) footer.append(h('span.err-text', 'Abgleich: ' + errText(st.error)), h('button.link', { onclick: () => syncAddon(id).catch(() => {}) }, 'Erneut versuchen'));
-    else footer.append(h('span.muted', st.lastSync ? `Abgeglichen ${fmtAgo(st.lastSync)}` : 'Noch nicht abgeglichen'), h('button.link', { onclick: () => syncAddon(id).then(() => toast('Abgeglichen')).catch((e) => toast(errText(e), 'err')) }, 'Jetzt'));
+    else if (st.error) footer.append(h('span.err-text', 'Abgleich: ' + errText(st.error)), h('button.link', { onclick: () => syncByHand(id).catch(() => {}) }, 'Erneut versuchen'));
+    else footer.append(h('span.muted', st.lastSync ? `Abgeglichen ${fmtAgo(st.lastSync)}` : 'Noch nicht abgeglichen'), h('button.link', { onclick: () => syncByHand(id).then(() => toast('Abgeglichen')).catch((e) => toast(errText(e), 'err')) }, 'Jetzt'));
     if (st.conflicts) footer.append(h('span.muted', ` · ${st.conflicts} Konflikt(e) gesichert`));
   };
   async function draw() {

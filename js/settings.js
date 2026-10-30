@@ -19,7 +19,7 @@ import { formSheet, parseNum } from './addons/ui.js';
 import { deleteSecret } from './secrets.js';
 import { features, hubList, tabList, loadLayout, saveLayout, MAX_TABS } from './layout.js';
 import { loadSyncLoc, getSyncLoc, setSyncLoc, normFolder, localSnapshots, cloudVersions, readCloudVersion, restoreAddon, snapshotLocal, syncLog } from './addons/store.js';
-import { ADDONS, resetCloudSync, overwriteCloudFromHere, getSyncPass, setSyncPass, syncAddon, openAddon, importExportZip } from './addons/store.js';
+import { ADDONS, resetCloudSync, overwriteCloudFromHere, getSyncPass, setSyncPass, syncAddon, syncByHand, openAddon, importExportZip } from './addons/store.js';
 
 const group = (title, foot, ...rows) => h('section.group', title ? h('h2.group-title', title) : null, h('div.group-body', rows), foot ? h('p.group-foot', foot) : null);
 const navRow = (ic, color, title, sub, onclick, value = '') => h('button.row', { onclick },
@@ -178,7 +178,7 @@ async function checkUpdate() {
 
 // Frühere Stände (lokal + Cloud) wiederherstellen, Sicherung per Knopf, Abgleich-Protokoll
 const fmtT = (t) => new Date(t).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-const cloudTime = (name) => { const m = /(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/.exec(name); return m ? `${m[3]}.${m[2]}. ${m[4]}:${m[5]}` : name.replace('.orbit', ''); };
+const cloudTime = (name) => { const d = /^(\d{4})(\d{2})(\d{2})\.orbit$/.exec(name); if (d) return `${d[3]}.${d[2]}.${d[1]} (Tagesstand)`; const m = /(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/.exec(name); return m ? `${m[3]}.${m[2]}. ${m[4]}:${m[5]}` : name.replace('.orbit', ''); };
 async function historySheet() {
   const body = h('div');
   const s = sheet(body, { title: 'Frühere Stände', wide: true });
@@ -201,7 +201,7 @@ async function historySheet() {
       h('h4', 'Auf diesem Gerät'),
       locals.length ? h('div.group-body', locals.map((x) => row(fmtT(x.t), x.label, () => ask(fmtT(x.t), async () => ({ data: x.data }))))) : h('p.muted', 'Noch keine Stände.'),
       h('h4', 'In der Cloud'),
-      cerr ? h('p.err-text', cerr) : clouds.length ? h('div.group-body', clouds.map((x) => row(cloudTime(x.name), x.name.startsWith('vor-') ? 'Vor einer Wiederherstellung' : x.name.startsWith('mobil-') ? 'Vom Handy gesichert' : x.name, () => ask(cloudTime(x.name), () => readCloudVersion(x.path))))) : h('p.muted', 'Noch keine Stände in der Cloud.'),
+      cerr ? h('p.err-text', cerr) : clouds.length ? h('div.group-body', clouds.map((x) => row(cloudTime(x.name), x.name.startsWith('vor-') ? 'Vor einer Wiederherstellung' : /^\d{8}\.orbit$/.test(x.name) ? 'Täglicher Gesamtstand' : x.name.startsWith('mobil-') ? 'Vom Handy gesichert' : x.name, () => ask(cloudTime(x.name), () => readCloudVersion(x.path))))) : h('p.muted', 'Noch keine Stände in der Cloud.'),
     );
   };
   const home = async (_m) => {
@@ -308,7 +308,7 @@ async function addonsGroup(rerender) {
     const api = await openAddon(a.id), st = api.status();
     rows.push(navRow(a.icon, a.color, a.title + ' jetzt abgleichen', st.error ? errText(st.error) : st.lastSync ? 'Abgeglichen ' + fmtAgo(st.lastSync) : api.hasData() ? 'Nur auf diesem Gerät' : 'Noch leer', async () => {
       if (!pass) { toast('Erst das Sync-Passwort eintragen', 'err'); return; }
-      try { await syncAddon(a.id); toast(a.title + ': abgeglichen'); } catch (e) { toast(errText(e), 'err'); }
+      try { await syncByHand(a.id); toast(a.title + ': abgeglichen'); } catch (e) { toast(errText(e), 'err'); }
       rerender();
     }));
   }
