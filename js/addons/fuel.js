@@ -17,13 +17,14 @@ function load(api) {
   const entries = api.get('entries', []);
   const costs = api.get('costs', []);
   // Standard-Fahrzeuge wie am PC: wenn die Liste leer ist oder Einträge sich auf sie beziehen
-  let added = false;
+  // (nur im Speicher, nicht in die Cloud schreiben: sonst überschreibt ein leerer Handy-Stand die Fahrzeuge vom PC)
+  const empty = vehicles.length === 0;
   for (const d of DEFAULTS) {
     if (vehicles.some((v) => v.id === d.id)) continue;
     const used = entries.some((e) => e.vehicle === d.id) || costs.some((c) => c.vehicle === d.id);
-    if (vehicles.length === 0 || used) { vehicles.push({ ...d }); added = true; }
+    if (empty || used) vehicles.push({ ...d });
   }
-  return { vehicles, entries, costs, added };
+  return { vehicles, entries, costs };
 }
 
 const unitOf = (v) => (v.kind === 'strom' ? 'kWh' : 'l');
@@ -41,8 +42,7 @@ function stats(v, ents, cts) {
 }
 
 export async function render(el, api, nav) {
-  const { vehicles, entries, costs, added } = load(api);
-  if (added) api.set('vehicles', vehicles).catch(() => {});
+  const { vehicles, entries, costs } = load(api);
   const save = (key, val) => api.set(key, val);
   const act = vehicles.filter((v) => !v.archived);
   const ents = inPeriod(entries), cts = inPeriod(costs);
