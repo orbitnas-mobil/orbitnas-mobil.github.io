@@ -16,28 +16,37 @@ import { ADDONS, syncAll } from './addons/store.js';
 import { renderFritz } from './fritz.js';
 import { openAddCloud, finishOAuth } from './addcloud.js';
 import { srcColor } from './fileops.js';
+import { loadLayout, onLayout, tabList, activeTab, hubList } from './layout.js';
 import { isUploading } from './upload.js';
 import { mountOpsBar } from './opsbar.js';
 import { APP_VERSION } from './version.js';
 
-const TABS = [
-  ['a', 'Orbit', 'grid'],
-  ['orte', 'NAS', 'folder'],
-  ['zuletzt', 'Zuletzt', 'clock'],
-  ['scan', 'Scan', 'camera'],
-  ['einstellungen', 'Einstellungen', 'gear'],
-];
 
 const root = document.getElementById('app');
 let view = null;
 let side = null;
+let tabsEl = null;
+
+function paintTabs() {
+  if (!tabsEl) return;
+  clear(tabsEl).append(...tabList().map((t) => h('a.tab', { href: t.href, 'data-tab': t.id }, h('span.ni', icon(t.icon)), h('span.nl', t.title))));
+  markTab();
+}
+function markTab() {
+  if (!tabsEl) return;
+  const { parts } = route();
+  const on = activeTab(parts[0] || 'a', parts, tabList());
+  tabsEl.querySelectorAll('[data-tab]').forEach((el) => el.classList.toggle('on', el.dataset.tab === on));
+}
+onLayout(() => { paintTabs(); paintSide(); if ((location.hash || '').startsWith('#/a') && !location.hash.startsWith('#/a/')) window.dispatchEvent(new HashChangeEvent('hashchange')); });
 
 function shell() {
   clear(root);
   side = h('nav.sidebar');
   view = h('main.view', { id: 'view' });
-  const tabs = h('nav.tabs', TABS.map(([id, label, ic]) => h('a.tab', { href: '#/' + id, 'data-tab': id }, h('span.ni', icon(ic)), h('span.nl', label))));
-  root.append(h('div.shell', side, view, tabs));
+  tabsEl = h('nav.tabs');
+  root.append(h('div.shell', side, view, tabsEl));
+  paintTabs();
   mountOpsBar(root);
   paintSide();
 }
@@ -52,9 +61,7 @@ function paintSide() {
   clear(side).append(
     h('div.side-head', h('img', { src: 'icons/icon-192.png', alt: '' }), h('b', 'Orbit NAS'), lockEnabled() ? h('button.nav-btn', { 'aria-label': 'Sperren', onclick: lockNow }, icon('lock')) : null),
     item('a', 'Orbit', 'grid', '#/a'),
-    ...ADDONS.filter((a) => !a.hidden).map((a) => item('a:' + a.id, a.title, a.icon, '#/a/' + a.id, a.color)),
-    item('zuletzt', 'Zuletzt', 'clock', '#/zuletzt'),
-    item('scan', 'Scan', 'camera', '#/scan'),
+    ...hubList().filter((f) => f.id !== 'nas').map((f) => item(f.id === 'scan' ? 'scan' : 'a:' + f.id, f.title, f.icon, f.href, f.id === 'scan' ? undefined : f.color)),
     h('div.side-title', 'NAS'),
     connections().filter((c) => c.type !== 'demo').length > 1 ? item('alle', 'Alle Quellen', 'layers', allHash(), 'var(--accent)') : null,
     ...connections().map((c) => item('d:' + c.id, c.name, c.type === 'demo' ? 'layers' : 'cloud', dirHash(c.id), srcColor(c.id))),
@@ -89,8 +96,7 @@ async function render() {
   if (!view || !document.body.contains(view)) shell();
   const { parts, query } = route();
   const page = parts[0] || 'a';
-  const tab = ['d', 'suche', 'fritz', 'alle'].includes(page) ? 'orte' : page;
-  root.querySelectorAll('[data-tab]').forEach((el) => el.classList.toggle('on', el.dataset.tab === tab));
+  markTab();
   document.documentElement.dataset.page = page;
   paintSide();
   const my = ++rendering;
@@ -198,6 +204,7 @@ function movedNotice() {
   await loadSettings();
   await loadLock();
   await initStore();
+  await loadLayout();
   await loadConnections();
   knownConns = connections().length;
   applyTheme();

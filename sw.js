@@ -1,5 +1,5 @@
 // Offline-Modus: Die App selbst liegt auf dem Gerät. Deine Daten (IndexedDB) fasst dieser Teil nie an.
-const BUILD = "813fd524f069";
+const BUILD = "f1d00b5a2b78";
 const APP_CACHE = 'orbitnas-app-' + BUILD;
 const THUMBS = 'orbitnas-thumbs';
 const OCR_CACHE = 'orbitnas-ocr-1';
@@ -21,6 +21,7 @@ const ASSETS = [
   "./js/fileops.js",
   "./js/files.js",
   "./js/fritz.js",
+  "./js/layout.js",
   "./js/lock.js",
   "./js/opsbar.js",
   "./js/picker.js",

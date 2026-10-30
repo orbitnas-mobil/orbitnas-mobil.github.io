@@ -149,9 +149,9 @@ export async function openAddon(id) {
       a.rev++; a.lastEdit = Date.now();
       await persist(a);
       emit(id, 'data');
-      scheduleSync(id, 3000);
+      scheduleSync(id, 1500);
     },
-    async remove(key) { delete a.data[key]; a.rev++; a.lastEdit = Date.now(); await persist(a); emit(id, 'data'); scheduleSync(id, 3000); },
+    async remove(key) { delete a.data[key]; a.rev++; a.lastEdit = Date.now(); await persist(a); emit(id, 'data'); scheduleSync(id, 1500); },
     status: () => ({ lastSync: a.lastSync, error: a.error, busy: a.busy, readOnly: a.readOnly, conflicts: a.conflicts.length }),
     hasData: () => Object.keys(a.data).length > 0,
     internal: a,
@@ -321,7 +321,11 @@ export async function syncAll() {
   return out;
 }
 
-setInterval(() => { if (document.visibilityState === 'visible' && /^#\/a\//.test(location.hash)) { const id = location.hash.split('/')[2]; if (addonById(id)) syncAddon(id).catch(() => {}); } }, 120000);
+let lastAll = 0;
+export function syncSoon() { if (document.visibilityState === 'visible' && Date.now() - lastAll > 15000) { lastAll = Date.now(); syncAll().catch(() => {}); } }
+setInterval(syncSoon, 60000);
+window.addEventListener('online', () => { lastAll = 0; syncSoon(); });
+document.addEventListener('visibilitychange', syncSoon);
 
 // ---------------------------------------------------------------- Import aus dem Orbit-Export (Daten-*.zip)
 
