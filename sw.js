@@ -1,5 +1,5 @@
 // Offline-Modus: Die App selbst liegt auf dem Gerät. Deine Daten (IndexedDB) fasst dieser Teil nie an.
-const BUILD = "279f3a03c1b5";
+const BUILD = "79b20421dbb4";
 const APP_CACHE = 'orbitnas-app-' + BUILD;
 const THUMBS = 'orbitnas-thumbs';
 const OCR_CACHE = 'orbitnas-ocr-1';

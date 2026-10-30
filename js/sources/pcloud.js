@@ -27,7 +27,7 @@ const LOGIN_CODES = [1000, 2000, 2094, 2095, 2297, 4000];
 
 function perr(method, code, text) {
   return new SourceError(MESSAGES[code] || text || 'Fehler bei pCloud', {
-    code, detail: `pCloud ${method}: ${code} ${text || ''}`.trim(), login: LOGIN_CODES.includes(code), notFound: code === 2005 || code === 2009,
+    code, detail: `pCloud ${method}: ${code} ${text || ''}`.trim(), login: LOGIN_CODES.includes(code), notFound: [2002, 2005, 2009, 2055].includes(code),
   });
 }
 
