@@ -20,5 +20,37 @@ export async function loadPrefs() {
   return cur;
 }
 export const pref = (k) => cur[k];
-export async function setPrefs(patch) { cur = { ...cur, ...patch }; await kv.set('addon:prefs', cur); }
+
+// Einstellungen, die mit dem PC (und anderen Handys) abgeglichen werden: Name hier → Name im Add-on (Schlüssel „_s.<name>“ im Abgleich).
+// Nur am Gerät bleiben: animations, vaultFace (Face ID) und alles zur Leiste/Startseite.
+export const SHARED = {
+  fuel: { fuelCharts: 'show_charts', fuelPrice: 'fuel_price', workKm: 'work_km', fuelVehicle: 'fuel_vehicle' },
+  notes: { notesColor: 'notes_color' },
+  vault: { vaultMinutes: 'autolock_min' },
+};
+export async function setPrefs(patch) {
+  cur = { ...cur, ...patch };
+  await kv.set('addon:prefs', cur);
+  const { openAddon } = await import('./store.js');
+  for (const [id, map] of Object.entries(SHARED)) {
+    for (const [k, name] of Object.entries(map)) {
+      if (!(k in patch)) continue;
+      const api = await openAddon(id);
+      const json = JSON.stringify(patch[k]);
+      if (api.raw('_s.' + name) !== json) await api.set('_s.' + name, json);
+    }
+  }
+}
+/** Nach einem Abgleich: Einstellungen aus den Daten des Add-ons übernehmen. */
+export async function applyShared(id, data) {
+  const map = SHARED[id];
+  if (!map) return;
+  const patch = {};
+  for (const [k, name] of Object.entries(map)) {
+    const raw = data['_s.' + name];
+    if (raw == null) continue;
+    try { const v = JSON.parse(raw); if (JSON.stringify(cur[k]) !== raw && typeof v === typeof DEFAULTS[k]) patch[k] = v; } catch { /* ignorieren */ }
+  }
+  if (Object.keys(patch).length) { cur = { ...cur, ...patch }; await kv.set('addon:prefs', cur); }
+}
 export const animated = () => cur.animations && !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
