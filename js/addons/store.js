@@ -7,6 +7,7 @@ import { kv } from '../db.js';
 import { saveSecret, loadSecret, deleteSecret } from '../secrets.js';
 import { mainConnection, source, ensureKeys } from '../sources/registry.js';
 import { devName } from '../store.js';
+import { applyShared } from './prefs.js';
 
 export const ADDONS = [
   { id: 'fuel', pc: 'de.dennis.orbit-fuel', title: 'Fuel Tracker', icon: 'fuel', color: '#00D4FF' },
@@ -299,6 +300,7 @@ export function syncAddon(id) {
         }
         if (a.rev !== rev0) continue;
         if (changesLocal) { a.data = merged; checkVersion(a); }
+        await applyShared(id, a.data);
         a.base = { ...merged };
         a.lastSync = Date.now(); a.error = null;
         if (conflicts.length) a.conflicts = [...a.conflicts, ...conflicts].slice(-20);
