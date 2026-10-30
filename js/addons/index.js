@@ -4,6 +4,7 @@ import { h, icon, clear, fmtAgo, toast } from '../util.js';
 import { go } from '../ui.js';
 import { ADDONS, addonById, openAddon, syncAddon, onAddon, getSyncPass } from './store.js';
 import { head } from './ui.js';
+import { loadPrefs, animated } from './prefs.js';
 import { errText } from '../fileops.js';
 
 const MODULES = {
@@ -17,6 +18,7 @@ let current = null;   // { id, off, redraw }
 window.addEventListener('orbit-vault-lock', () => { if (current?.id === 'vault') current.redraw(); });
 
 export async function renderAddons(view, parts) {
+  await loadPrefs();
   if (current) { current.off(); current = null; }
   const id = parts[1];
   if (!id || !addonById(id)) return hub(view);
@@ -70,7 +72,8 @@ async function hub(view) {
   }));
   clear(view).append(h('div.page.ios.ad-page',
     ...head('Orbit'),
-    h('div.ad-tiles', tiles),
+    h('div.ad-orbit', { hidden: !animated() }, h('i'), h('i'), h('i')),
+    h('div.ad-tiles' + (animated() ? '.anim' : ''), tiles),
     h('section.ad-card', h('b', 'Alte Daten übernehmen'), h('p.muted', 'Export-Dateien aus dem alten Orbit (Daten-Fuel-Tracker.zip, Daten-Notizen.zip, Daten-Reisen.zip) einlesen.'),
       h('button.btn', { onclick: () => go('#/einstellungen') }, 'Einstellungen › Daten aus Orbit-Export importieren')),
     !pass ? h('section.ad-card', h('b', 'Daten mit dem PC abgleichen'),

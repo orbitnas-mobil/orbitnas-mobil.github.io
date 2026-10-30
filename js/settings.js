@@ -14,6 +14,9 @@ import { openFritz, fritzConfigured } from './fritz.js';
 import { pageHead } from './files.js';
 import { srcColor, setIgnored, errText } from './fileops.js';
 import { APP_VERSION } from './version.js';
+import { loadPrefs, pref, setPrefs } from './addons/prefs.js';
+import { formSheet, parseNum } from './addons/ui.js';
+import { deleteSecret } from './secrets.js';
 import { ADDONS, getSyncPass, setSyncPass, syncAddon, openAddon, importExportZip } from './addons/store.js';
 
 const group = (title, foot, ...rows) => h('section.group', title ? h('h2.group-title', title) : null, h('div.group-body', rows), foot ? h('p.group-foot', foot) : null);
@@ -49,6 +52,7 @@ export async function renderSettings(view, parts = []) {
     st.error ? h('div.row.info', h('span.row-main', h('span.row-title.err-text', 'Fehler'), h('small.row-sub', errText(st.error)))) : null,
     main && main.type !== 'demo' ? actRow('Jetzt abgleichen', async () => { await store.syncStore(); toast(store.status.error ? errText(store.status.error) : 'Abgeglichen', store.status.error ? 'err' : ''); rerender(); }) : null));
 
+  page.append(await addonPrefsGroup(rerender));
   page.append(await addonsGroup(rerender));
   page.append(appearance(rerender));
   page.append(await security(rerender));
@@ -211,4 +215,64 @@ async function addonsGroup(rerender) {
       rerender();
     }) : null,
     ...rows);
+}
+
+// Einstellungen für Startbildschirm, Fuel Tracker, Notizen und Tresor (nur auf diesem Gerät)
+async function addonPrefsGroup(rerender) {
+  await loadPrefs();
+  const comma = (n) => String(n).replace('.', ',');
+  const fuel = async () => {
+    const api = await openAddon('fuel');
+    const vs = api.get('vehicles', []);
+    const defs = [{ id: 'bmw_diesel', name: 'BMW Diesel', kind: 'diesel', consumption: 5.3 }, { id: 'tesla_model3', name: 'Tesla Model 3', kind: 'strom', consumption: 15 }];
+    const list = vs.length ? vs.filter((v) => !v.archived) : defs;
+    formSheet({
+      title: 'Fuel Tracker',
+      fields: [
+        { key: 'veh', label: 'Fahrzeug vorausgewählt', type: 'select', options: list.map((v) => ({ value: v.id, label: v.name })), value: pref('fuelVehicle') },
+        { key: 'price', label: 'Strompreis vorbelegt (Cent pro kWh)', type: 'number', value: comma(pref('fuelPrice')), hint: 'Beim Eintrag jederzeit änderbar.' },
+        { key: 'wk', label: 'Kilometer pro Arbeitstag', type: 'number', value: comma(pref('workKm')) },
+        { key: 'charts', label: 'Diagramme anzeigen', type: 'check', value: pref('fuelCharts') },
+        ...list.map((v) => ({ key: 'c_' + v.id, label: `Verbrauch ${v.name} (${v.kind === 'strom' ? 'kWh' : 'l'}/100 km)`, type: 'number', value: comma(v.consumption) })),
+      ],
+      onSubmit: async (v) => {
+        const price = parseNum(v.price), wk = parseNum(v.wk);
+        if (price == null || price <= 0 || wk == null || wk <= 0) return 'Bitte Preis und Kilometer als Zahl eingeben.';
+        const cons = {};
+        for (const x of list) { const c = parseNum(v['c_' + x.id]); if (c == null || c <= 0) return `Bitte den Verbrauch für ${x.name} angeben.`; cons[x.id] = c; }
+        await setPrefs({ fuelVehicle: v.veh, fuelPrice: price, workKm: wk, fuelCharts: v.charts });
+        const base = vs.length ? vs : defs.map((d) => ({ ...d, archived: false }));
+        await api.set('vehicles', base.map((x) => (cons[x.id] != null && cons[x.id] !== Number(x.consumption) ? { ...x, consumption: cons[x.id] } : x)));
+        toast('Gespeichert'); rerender();
+      },
+    });
+  };
+  const notes = () => formSheet({
+    title: 'Notizen',
+    fields: [{ key: 'color', label: 'Standardfarbe neuer Notizen', type: 'select', options: ['Indigo', 'Lila', 'Grün', 'Gelb', 'Rosa', 'Blau'], value: pref('notesColor') }],
+    onSubmit: async (v) => { await setPrefs({ notesColor: v.color }); toast('Gespeichert'); rerender(); },
+  });
+  const vault = () => formSheet({
+    title: 'Tresor',
+    fields: [
+      { key: 'min', label: 'Automatisch sperren nach (Minuten)', type: 'select', options: ['1', '2', '3', '5', '10', '15'], value: String(pref('vaultMinutes')) },
+      { key: 'face', label: 'Mit Face ID öffnen', type: 'check', value: pref('vaultFace'), hint: 'Das Master-Passwort bleibt verschlüsselt auf diesem Gerät und wird nach Face ID freigegeben. Beim ersten Mal das Passwort einmal von Hand eingeben.' },
+    ],
+    onSubmit: async (v) => {
+      if (v.face && !lock.faceId) {
+        try {
+          if (!(await faceIdAvailable())) return 'Face ID ist auf diesem Gerät nicht verfügbar.';
+          await enrollFaceId();
+        } catch (e) { return 'Face ID konnte nicht eingerichtet werden: ' + (e.message || e); }
+      }
+      if (!v.face) await deleteSecret('vaultPw');
+      await setPrefs({ vaultMinutes: Number(v.min), vaultFace: v.face });
+      toast('Gespeichert'); rerender();
+    },
+  });
+  return group('Add-on-Einstellungen', 'Gelten nur auf diesem Gerät.',
+    toggleRow('Animationen im Startbildschirm', 'Orbit-Reiter', pref('animations'), async (on) => { await setPrefs({ animations: on }); }),
+    navRow('fuel', '#00D4FF', 'Fuel Tracker', `${pref('fuelPrice')} ct/kWh · ${pref('workKm')} km/Arbeitstag`, fuel),
+    navRow('note', '#A855F7', 'Notizen', 'Standardfarbe ' + pref('notesColor'), notes),
+    navRow('lock', '#3DFFA2', 'Tresor', `Sperre nach ${pref('vaultMinutes')} Min.${pref('vaultFace') ? ' · Face ID' : ''}`, vault));
 }

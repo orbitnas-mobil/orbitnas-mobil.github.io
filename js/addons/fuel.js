@@ -2,9 +2,9 @@
 // Daten wie am PC (Add-on de.dennis.orbit-fuel): vehicles, entries, costs.
 
 import { h, icon, toast, actionSheet, confirmDialog } from '../util.js';
+import { pref } from './prefs.js';
 import { head, formSheet, stat, card, collapse, barChart, donut, splitBar, fmt, eur, num, parseNum, today, deDate, validDate, newId, PALETTE } from './ui.js';
 
-const WK = 130;   // km pro Arbeitstag (wie am PC)
 const DEFAULTS = [
   { id: 'bmw_diesel', name: 'BMW Diesel', kind: 'diesel', consumption: 5.3, archived: false },
   { id: 'tesla_model3', name: 'Tesla Model 3', kind: 'strom', consumption: 15, archived: false },
@@ -38,7 +38,7 @@ function stats(v, ents, cts) {
   const per100 = cons * avg;
   const km = cons > 0 ? (amount / cons) * 100 : 0;
   const total = fuel + ex;
-  return { cons, amount, fuel, extra: ex, total, avg, per100, workday: per100 * (WK / 100), km, perKm: km > 0 ? total / km : 0, count: own.length };
+  return { cons, amount, fuel, extra: ex, total, avg, per100, workday: per100 * (pref('workKm') / 100), km, perKm: km > 0 ? total / km : 0, count: own.length };
 }
 
 export async function render(el, api, nav) {
@@ -73,7 +73,7 @@ export async function render(el, api, nav) {
         h('div.ad-vh', h('i.dot'), h('b', v.name), h('small.muted', `${s.count} ${v.kind === 'strom' ? 'Ladungen' : 'Tankungen'}`)),
         h('div.ad-stats3',
           stat('Kosten / 100 km', eur(s.per100)),
-          stat('Kosten / Arbeitstag', eur(s.workday), `${WK} km`),
+          stat('Kosten / Arbeitstag', eur(s.workday), `${pref('workKm')} km`),
           stat(v.kind === 'strom' ? 'Ø Preis / kWh' : 'Ø Preis / l', eur(s.avg, 3))),
         h('div.ad-line', h('span', 'Pro Kilometer'), h('b', fmt(s.perKm, 3) + ' €/km')),
         h('div.ad-line', h('span', 'Gesamt'), h('b', `${eur(s.total)} · ${fmt(s.km, 0)} km`)));
@@ -85,7 +85,7 @@ export async function render(el, api, nav) {
     const [a, b] = act;
     const defs = [
       ['Kosten / 100 km', (s) => s.per100, (x) => eur(x)],
-      [`Kosten / Arbeitstag (${WK} km)`, (s) => s.workday, (x) => eur(x)],
+      [`Kosten / Arbeitstag (${pref('workKm')} km)`, (s) => s.workday, (x) => eur(x)],
       ['Ø Preis je l / kWh', (s) => s.avg, (x) => eur(x, 3)],
       ['Kraftstoff gesamt', (s) => s.fuel, (x) => eur(x)],
       ['Zusatzkosten gesamt', (s) => s.extra, (x) => eur(x)],
@@ -99,13 +99,13 @@ export async function render(el, api, nav) {
     const cand = act.filter((v) => st.get(v.id).per100 > 0).sort((p, q) => st.get(p.id).per100 - st.get(q.id).per100);
     const better = cand.length >= 2 ? (() => {
       const d = st.get(cand[cand.length - 1].id).per100 - st.get(cand[0].id).per100;
-      return h('div.ad-better', h('b', `${cand[0].name} ist günstiger`), h('span', `${eur(d)} pro 100 km · ${eur(d * WK / 100)} pro Arbeitstag`));
+      return h('div.ad-better', h('b', `${cand[0].name} ist günstiger`), h('span', `${eur(d)} pro 100 km · ${eur(d * pref('workKm') / 100)} pro Arbeitstag`));
     })() : null;
     page.append(card('KFZ-Vergleich', h('div.ad-legend', act.slice(0, 2).map((v) => h('span', { style: { '--c': colorOf(v) } }, h('i.dot'), v.name))), ...rows, better));
   }
 
   // Diagramme
-  if (act.length) {
+  if (act.length && pref('fuelCharts')) {
     const months = [...new Set([...ents, ...cts].map((x) => String(x.date || '').slice(0, 7)).filter((m) => m.length === 7))].sort().slice(-24);
     if (months.length) {
       const series = act.map((v) => ({
@@ -156,7 +156,7 @@ export async function render(el, api, nav) {
   function entryForm(e = null) {
     const names = act.map((v) => v.name);
     if (e && !names.includes(vName(e.vehicle))) names.push(vName(e.vehicle));
-    const defV = e ? vName(e.vehicle) : (act.find((v) => v.kind === 'strom') || act[0] || {}).name;
+    const defV = e ? vName(e.vehicle) : (act.find((v) => v.id === pref('fuelVehicle')) || act.find((v) => v.kind === 'strom') || act[0] || {}).name;
     if (!names.length) { toast('Bitte zuerst ein Fahrzeug anlegen.'); return; }
     const kindOf = (name) => vehicles.find((v) => v.name === name)?.kind;
     const priceCent = e && kindOf(vName(e.vehicle)) === 'strom' && num(e.amount) > 0 ? fmt(num(e.cost) / num(e.amount) * 100, 1) : '';
@@ -166,7 +166,7 @@ export async function render(el, api, nav) {
         { key: 'vehicle', label: 'Fahrzeug', type: 'select', options: names, value: defV },
         { key: 'date', label: 'Datum', type: 'date', value: e ? e.date : today() },
         { key: 'amount', label: 'Menge', type: 'number', value: e ? String(e.amount).replace('.', ',') : '', placeholder: 'Liter oder kWh', hint: 'Liter bei Kraftstoff, kWh bei Strom' },
-        { key: 'price', label: 'Preis (Cent pro kWh)', type: 'number', value: priceCent, show: (v) => kindOf(v.vehicle) === 'strom' },
+        { key: 'price', label: 'Preis (Cent pro kWh)', type: 'number', value: priceCent || (e ? '' : String(pref('fuelPrice')).replace('.', ',')), show: (v) => kindOf(v.vehicle) === 'strom' },
         { key: 'cost', label: 'Kosten gesamt (€)', type: 'number', value: e && kindOf(vName(e.vehicle)) !== 'strom' ? String(e.cost).replace('.', ',') : '', show: (v) => kindOf(v.vehicle) !== 'strom' },
         { key: 'notes', label: 'Notiz', type: 'text', value: e?.notes || '' },
       ],
@@ -258,11 +258,11 @@ function calcBlock(nav) {
     out.replaceChildren();
     if (cents == null || evc == null) return;
     const ev100 = (cents / 100) * evc;
-    out.append(h('p', `Elektro: ${eur(ev100)} / 100 km · ${eur(ev100 * WK / 100)} / Arbeitstag · ${eur(ev100 / 100, 3)} / km`));
+    out.append(h('p', `Elektro: ${eur(ev100)} / 100 km · ${eur(ev100 * pref('workKm') / 100)} / Arbeitstag · ${eur(ev100 / 100, 3)} / km`));
     if (dp != null && dc != null) {
       const d100 = dp * dc, sv = d100 - ev100;
-      out.append(h('p', `Diesel: ${eur(d100)} / 100 km · ${eur(d100 * WK / 100)} / Arbeitstag · ${eur(d100 / 100, 3)} / km`),
-        h('p', { class: sv >= 0 ? 'ok-text' : 'err-text' }, `${sv >= 0 ? 'Ersparnis Elektro' : 'Mehrkosten Elektro'}: ${eur(Math.abs(sv))} pro 100 km, ${eur(Math.abs(sv) * WK / 100)} pro Arbeitstag`));
+      out.append(h('p', `Diesel: ${eur(d100)} / 100 km · ${eur(d100 * pref('workKm') / 100)} / Arbeitstag · ${eur(d100 / 100, 3)} / km`),
+        h('p', { class: sv >= 0 ? 'ok-text' : 'err-text' }, `${sv >= 0 ? 'Ersparnis Elektro' : 'Mehrkosten Elektro'}: ${eur(Math.abs(sv))} pro 100 km, ${eur(Math.abs(sv) * pref('workKm') / 100)} pro Arbeitstag`));
     }
   };
   box.append(inp('cents', 'Strompreis (Cent/kWh)'), inp('ev', 'EV-Verbrauch (kWh/100 km)'), inp('diesel', 'Diesel (€/l)'), inp('dcons', 'Diesel-Verbrauch (l/100 km)'), out);
