@@ -231,7 +231,9 @@ export function choosePin(title, hint = '') {
 
 /** Programm-PIN festlegen oder ändern (gilt am PC und auf allen Geräten). */
 export async function setOwnPin() {
-  if (activePin() && !(await askSecurity('PIN ändern'))) return false;
+  const cur = activePin();
+  if (cur && !(await askPin('Alte PIN eingeben', cur.hash, cur.length))) return false;
+  if (cur && !(await askSecurity('PIN ändern'))) return false;
   const r = await choosePin(activePin() ? 'Neue Programm-PIN' : 'Programm-PIN festlegen', 'Die PIN gilt auch am PC.');
   if (!r) return false;
   await setSingle('appPin', { hash: r.hash, length: r.length });

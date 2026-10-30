@@ -222,8 +222,14 @@ async function addonsGroup(rerender) {
     'Die Daten liegen verschlüsselt in der Haupt-Cloud (Ordner .orbitnas/addons) und werden mit Orbit am PC abgeglichen. Dafür am PC pro Add-on „Online-Abgleich“ einschalten und hier dasselbe Sync-Passwort eintragen. Das Passwort bleibt nur auf diesem Gerät.',
     infoRow('Sync-Passwort', pass ? 'gesetzt' : 'fehlt'),
     actRow(pass ? 'Sync-Passwort ändern …' : 'Sync-Passwort eintragen …', async () => {
-      const p = await promptDialog('Dasselbe Passwort wie in Orbit am PC (Einstellungen › Add-on-Optionen).', '', { title: 'Sync-Passwort', ok: 'Speichern' });
+      if (pass) {
+        const old = await promptDialog('Zur Sicherheit: aktuelles Sync-Passwort eingeben.', '', { title: 'Altes Passwort', ok: 'Weiter' });
+        if (old == null) return;
+        if (old !== pass) { toast('Das alte Passwort stimmt nicht.', 'err'); return; }
+      }
+      const p = await promptDialog('Dasselbe Passwort wie in Orbit am PC (Einstellungen › Add-on-Optionen).', '', { title: pass ? 'Neues Sync-Passwort' : 'Sync-Passwort', ok: 'Speichern' });
       if (p == null || !p) return;
+      if (pass) { const p2 = await promptDialog('Neues Passwort zur Kontrolle noch einmal eingeben.', '', { title: 'Wiederholen', ok: 'Speichern' }); if (p2 !== p) { toast('Die beiden Eingaben passen nicht zusammen.', 'err'); return; } }
       await setSyncPass(p);
       toast('Gespeichert. Gleiche ab …');
       const res = await Promise.allSettled(ADDONS.map((a) => syncAddon(a.id)));
