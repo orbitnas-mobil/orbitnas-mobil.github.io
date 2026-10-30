@@ -202,6 +202,26 @@ async function pickSyncFolder(rerender) {
     h('label.ad-field', h('span.ad-label', 'Ordner'), path),
     h('button.btn', { type: 'button', onclick: () => { const p = path.value.split('/').filter(Boolean); p.pop(); path.value = p.join('/'); load(); } }, 'Eine Ebene hoch'),
     list, msg);
+  const diag = h('pre.muted.small', { style: { whiteSpace: 'pre-wrap', userSelect: 'text' } }, '');
+  const test = async () => {
+    const out = [];
+    const show = () => { diag.textContent = out.join('\n'); };
+    const step = async (name, fn) => {
+      try { const r = await fn(); out.push('OK  ' + name + (r ? ' – ' + r : '')); } catch (e) { out.push('FEHLER  ' + name + ': ' + (e.message || e) + (e.detail ? ' [' + e.detail + ']' : '')); }
+      show();
+    };
+    const folder = '/' + normFolder(path.value);
+    let src;
+    await step('Anmelden bei ' + (conns.find((c) => c.id === sel.value)?.name || '?'), async () => { src = await source(sel.value); return (await src.info()).email; });
+    if (!src) return;
+    await step('Hauptordner lesen', async () => (await src.list('/')).length + ' Einträge');
+    await step('Ordner anlegen ' + folder, async () => { let cur = ''; for (const n of folder.split('/').filter(Boolean)) { try { await src.mkdir(cur || '/', n); } catch (e) { if (e.code !== 2004) throw e; } cur += '/' + n; } });
+    await step('Ordner lesen', async () => (await src.list(folder)).length + ' Einträge');
+    await step('Testdatei schreiben', async () => { await src.writeText(folder + '/orbit-test.txt', 'test ' + new Date().toISOString()); });
+    await step('Testdatei lesen', async () => (await src.readText(folder + '/orbit-test.txt'))?.slice(0, 20));
+    out.push('Fertig. Bitte diese Zeilen als Screenshot schicken.'); show();
+  };
+  body.append(h('button.btn', { type: 'button', onclick: test }, 'Verbindung testen'), diag);
   const s = sheet(body, { title: 'Abgleich-Ordner' });
   body.append(h('div.btn-row', h('button.btn', { type: 'button', onclick: () => s.close() }, 'Abbrechen'),
     h('button.btn.primary', { type: 'button', onclick: async () => { await setSyncLoc(sel.value, path.value); s.close(); toast('Gespeichert. Nächster Abgleich führt dort zusammen.'); rerender(); } }, 'Übernehmen')));
