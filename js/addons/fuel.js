@@ -7,7 +7,7 @@ import { head, formSheet, stat, card, collapse, barChart, donut, splitBar, fmt, 
 
 const DEFAULTS = [
   { id: 'bmw_diesel', name: 'BMW Diesel', kind: 'diesel', consumption: 5.3, archived: false },
-  { id: 'tesla_model3', name: 'Tesla Model 3', kind: 'strom', consumption: 15, archived: false },
+  { id: 'tesla_model3', name: 'Tesla Model 3', kind: 'strom', consumption: 14.2, archived: false },
 ];
 
 /** Standardfahrzeuge (BMW, Tesla) fest in den Speicher schreiben, damit ein „Schnitt“ sie mitnimmt. */
