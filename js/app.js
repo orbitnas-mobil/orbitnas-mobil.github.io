@@ -229,3 +229,10 @@ function movedNotice() {
     syncAll().catch(() => {});
   }
 })();
+
+// Beim Tippen Animationen anhalten: verhindert Zittern/Neuzeichnen, solange ein Eingabefeld den Cursor hat
+{
+  const isField = (t) => t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT');
+  document.addEventListener('focusin', (e) => { if (isField(e.target)) document.documentElement.classList.add('typing'); });
+  document.addEventListener('focusout', () => { document.documentElement.classList.remove('typing'); });
+}

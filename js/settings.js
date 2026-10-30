@@ -2,12 +2,12 @@
 // Auto-Sperre, Auge-Knopf, Ignorierte), gilt auch am PC. Anmeldungen, Face ID und die 24 Stunden bleiben auf diesem Gerät.
 
 import { h, icon, fmtSize, fmtAgo, toast, confirmDialog, promptDialog, clear, sheet } from './util.js';
-import { cache, usage, persist } from './db.js';
+import { cache, usage, persist, kv } from './db.js';
 import { connections, connById, connByKey, source, removeConnection, renameConnection, mainConnection, PROVIDERS } from './sources/registry.js';
 import * as store from './store.js';
 import { settings, saveSettings, applyTheme, isStandalone, go, dirHash } from './ui.js';
 import { THEMES, ACCENTS } from './theme.js';
-import { lock, saveLock, activePin, faceIdAvailable, enrollFaceId, disableFaceId, setOwnPin, removePin, checkFaceId } from './lock.js';
+import { lock, saveLock, activePin, faceIdAvailable, enrollFaceId, enrollCredential, disableFaceId, setOwnPin, removePin, checkFaceId } from './lock.js';
 import { securityQuestion, askSecurity, editSecurity } from './secq.js';
 import { openAddCloud, relogin } from './addcloud.js';
 import { openFritz, fritzConfigured } from './fritz.js';
@@ -18,7 +18,7 @@ import { loadPrefs, pref, setPrefs } from './addons/prefs.js';
 import { formSheet, parseNum } from './addons/ui.js';
 import { deleteSecret } from './secrets.js';
 import { features, hubList, tabList, loadLayout, saveLayout, MAX_TABS } from './layout.js';
-import { loadSyncLoc, getSyncLoc, setSyncLoc, normFolder } from './addons/store.js';
+import { loadSyncLoc, getSyncLoc, setSyncLoc, normFolder, localSnapshots, cloudVersions, readCloudVersion, restoreAddon, snapshotLocal, syncLog } from './addons/store.js';
 import { ADDONS, resetCloudSync, overwriteCloudFromHere, getSyncPass, setSyncPass, syncAddon, openAddon, importExportZip } from './addons/store.js';
 
 const group = (title, foot, ...rows) => h('section.group', title ? h('h2.group-title', title) : null, h('div.group-body', rows), foot ? h('p.group-foot', foot) : null);
@@ -176,6 +176,46 @@ async function checkUpdate() {
   if (reg.waiting || reg.installing) toast('Neue Version wird geladen …'); else toast('Du hast die neueste Version.');
 }
 
+// Frühere Stände (lokal + Cloud) wiederherstellen, Sicherung per Knopf, Abgleich-Protokoll
+const fmtT = (t) => new Date(t).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+const cloudTime = (name) => { const m = /(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/.exec(name); return m ? `${m[3]}.${m[2]}. ${m[4]}:${m[5]}` : name.replace('.orbit', ''); };
+async function historySheet() {
+  const body = h('div');
+  const s = sheet(body, { title: 'Frühere Stände', wide: true });
+  const show = async (meta) => {
+    if (!meta) return home();
+    body.replaceChildren(h('p.muted', 'Lädt …'));
+    let locals = [], clouds = [], cerr = '';
+    try { locals = await localSnapshots(meta.pc); } catch { /* leer */ }
+    try { clouds = await cloudVersions(meta.id); } catch (e) { cerr = errText(e); }
+    const ask = async (label, load) => {
+      if (!(await confirmDialog(`Den Stand „${label}“ von ${meta.title} wiederherstellen? Der jetzige Stand wird vorher gesichert (hier und in der Cloud).`, { title: 'Wiederherstellen?', ok: 'Weiter', danger: true }))) return;
+      if (!(await confirmDialog('Wirklich? Die Daten dieses Add-ons werden durch diesen Stand ersetzt und auch an deine anderen Geräte weitergegeben.', { title: 'Zweite Bestätigung', ok: 'Ja, wiederherstellen', danger: true }))) return;
+      try { const d = await load(); await restoreAddon(meta.id, d.data); toast('Wiederhergestellt.'); s.close(); } catch (e) { toast('Nicht möglich: ' + errText(e), 'err'); }
+    };
+    const row = (t, sub, onclick) => h('button.row', { onclick }, h('span.row-main', h('span.row-title', t), sub ? h('small.row-sub', sub) : null), icon('chevron', 'chev'));
+    body.replaceChildren(
+      h('button.btn', { onclick: () => show(null) }, '‹ Zurück'),
+      h('h3', meta.title),
+      h('button.btn.primary', { onclick: async () => { const api = await openAddon(meta.id); await snapshotLocal(meta.pc, api.internal.data, 'Von Hand', true); toast('Stand gesichert.'); show(meta); } }, 'Jetzt Stand sichern'),
+      h('h4', 'Auf diesem Gerät'),
+      locals.length ? h('div.group-body', locals.map((x) => row(fmtT(x.t), x.label, () => ask(fmtT(x.t), async () => ({ data: x.data }))))) : h('p.muted', 'Noch keine Stände.'),
+      h('h4', 'In der Cloud'),
+      cerr ? h('p.err-text', cerr) : clouds.length ? h('div.group-body', clouds.map((x) => row(cloudTime(x.name), x.name.startsWith('vor-') ? 'Vor einer Wiederherstellung' : x.name.startsWith('mobil-') ? 'Vom Handy gesichert' : x.name, () => ask(cloudTime(x.name), () => readCloudVersion(x.path))))) : h('p.muted', 'Noch keine Stände in der Cloud.'),
+    );
+  };
+  const home = async (_m) => {
+    const log = await syncLog();
+    body.replaceChildren(
+      h('p.muted', 'Stände werden nie automatisch gelöscht. Wähle ein Add-on:'),
+      h('div.group-body', ADDONS.filter((m) => !m.hidden).map((m) => h('button.row', { onclick: () => show(m) }, h('span.row-main', h('span.row-title', m.title)), icon('chevron', 'chev')))),
+      h('h4', 'Abgleich-Protokoll'),
+      log.length ? h('pre.muted', { style: { whiteSpace: 'pre-wrap', fontSize: '12px', maxHeight: '35vh', overflow: 'auto' } }, log.slice(0, 40).map((l) => `${fmtT(l.t)}  ${(ADDONS.find((a) => a.id === l.id)?.title) || l.id}: ${l.text}`).join('\n')) : h('p.muted', 'Noch nichts protokolliert.'),
+    );
+  };
+  home();
+}
+
 // Quelle und Ordner für den Abgleich wählen (nur dieses Gerät; Geräte mit demselben Ordner gleichen sich ab)
 async function pickSyncFolder(rerender) {
   await loadSyncLoc();
@@ -275,6 +315,7 @@ async function addonsGroup(rerender) {
   return group('Orbit-Add-ons (Fuel Tracker, Notizen, Reisen, Tresor)',
     'Die Daten liegen verschlüsselt in der Haupt-Cloud (Ordner .orbitnas/addons) und werden mit Orbit am PC abgeglichen. Dafür am PC pro Add-on „Online-Abgleich“ einschalten und hier dasselbe Sync-Passwort eintragen. Das Passwort bleibt nur auf diesem Gerät.',
     infoRow('Sync-Passwort', pass ? 'gesetzt' : 'fehlt'),
+    navRow('clock', '#F59E0B', 'Frühere Stände & Protokoll', 'Wiederherstellen, Stand sichern, Abgleich-Verlauf', historySheet),
     navRow('folder', '#4F8CFF', 'Abgleich-Ordner wählen …', 'Quelle: ' + (connById(getSyncLoc().cloudId)?.name || mainConnection()?.name || 'keine') + ', Ordner: /' + normFolder(getSyncLoc().folder), () => pickSyncFolder(rerender)),
     actRow(pass ? 'Sync-Passwort ändern …' : 'Sync-Passwort eintragen …', async () => {
       if (pass) {
@@ -372,16 +413,16 @@ async function addonPrefsGroup(rerender) {
     title: 'Tresor',
     fields: [
       { key: 'min', label: 'Automatisch sperren nach (Minuten)', type: 'select', options: ['1', '2', '3', '5', '10', '15'], value: String(pref('vaultMinutes')) },
-      { key: 'face', label: 'Mit Face ID öffnen', type: 'check', value: pref('vaultFace'), hint: 'Das Master-Passwort bleibt verschlüsselt auf diesem Gerät und wird nach Face ID freigegeben. Beim ersten Mal das Passwort einmal von Hand eingeben.' },
+      { key: 'face', label: 'Mit Face ID öffnen', type: 'check', value: pref('vaultFace'), hint: 'Nur für den Tresor (die App selbst bleibt davon unberührt). Das Master-Passwort bleibt verschlüsselt auf diesem Gerät. Beim ersten Mal das Passwort einmal von Hand eingeben.' },
     ],
     onSubmit: async (v) => {
-      if (v.face && !lock.faceId) {
+      if (v.face && !(await kv.get('vault:face'))?.id) {
         try {
           if (!(await faceIdAvailable())) return 'Face ID ist auf diesem Gerät nicht verfügbar.';
-          await enrollFaceId();
+          await kv.set('vault:face', { id: await enrollCredential(), created: new Date().toISOString() });
         } catch (e) { return 'Face ID konnte nicht eingerichtet werden: ' + (e.message || e); }
       }
-      if (!v.face) await deleteSecret('vaultPw');
+      if (!v.face) { await deleteSecret('vaultPw'); await kv.del('vault:face'); }
       await setPrefs({ vaultMinutes: Number(v.min), vaultFace: v.face });
       toast('Gespeichert'); rerender();
     },

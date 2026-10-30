@@ -78,14 +78,15 @@ export async function initStore() {
 const saveLocal = () => kv.set('einstellungen', { doc, dirty, firstDone });
 
 async function mainSource() {
-  await ensureKeys();
-  const c = mainConnection();
-  if (!c || c.type === 'demo') return null;
-  return source(c.id);
+  const A = await import('./addons/store.js');
+  await A.loadSyncLoc();
+  return A.syncSource();
 }
 
 async function readRemote(src) {
-  const text = await src.readText(FILE);
+  const A = await import('./addons/store.js');
+  // neuer Ort im Abgleich-Ordner; ältere Geräte/Stände liegen noch in /.orbitnas
+  const text = (await src.readText(A.settingsFilePath())) || (await src.readText(FILE));
   if (!text) return {};
   try { const j = JSON.parse(text); return j && typeof j === 'object' ? j : {}; } catch { return {}; }
 }
@@ -122,7 +123,9 @@ async function write(src, merged) {
   // direkt vor dem Schreiben noch einmal lesen, damit nichts verloren geht
   const latest = merge(merged, await readRemote(src));
   const out = purge({ ...latest, v: 1, updated: now(), device: devName() });
-  await src.writeText(FILE, JSON.stringify(out, null, 2));
+  const A = await import('./addons/store.js');
+  await A.ensureSyncFolder(src);
+  await src.writeText(A.settingsFilePath(), JSON.stringify(out, null, 2));
   doc = out;
   dirty = false;
   status.lastWrite = Date.now();

@@ -31,6 +31,29 @@ export const faceIdAvailable = async () => {
   catch { return false; }
 };
 
+/** Eigene Face-ID-Kennung (z. B. nur für den Tresor), unabhängig von der App-Sperre. Gibt die Kennung zurück. */
+export async function enrollCredential() {
+  const cred = await navigator.credentials.create({
+    publicKey: {
+      rp: { name: 'Orbit NAS' },
+      user: { id: crypto.getRandomValues(new Uint8Array(16)), name: 'Orbit Tresor', displayName: 'Orbit Tresor' },
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+      authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'preferred' },
+      timeout: 60000,
+    },
+  });
+  return bytesToB64url(new Uint8Array(cred.rawId));
+}
+
+export async function checkCredential(id) {
+  if (!id) return false;
+  const a = await navigator.credentials.get({
+    publicKey: { challenge: crypto.getRandomValues(new Uint8Array(32)), allowCredentials: [{ type: 'public-key', id: b64urlToBytes(id) }], userVerification: 'required', timeout: 60000 },
+  });
+  return (new Uint8Array(a.response.authenticatorData)[32] & 0x04) === 0x04;
+}
+
 export async function enrollFaceId() {
   const cred = await navigator.credentials.create({
     publicKey: {
