@@ -6,6 +6,7 @@ import { ADDONS, addonById, openAddon, syncAddon, onAddon, getSyncPass } from '.
 import { head } from './ui.js';
 import { loadPrefs, animated } from './prefs.js';
 import { errText } from '../fileops.js';
+import { loadLayout, hubList } from '../layout.js';
 
 const MODULES = {
   fuel: () => import('./fuel.js'),
@@ -64,21 +65,23 @@ async function hub(view) {
   const pass = await getSyncPass();
   const subs = new Map();
   const subText = (api) => (api.hasData() ? (api.status().lastSync ? 'Abgeglichen ' + fmtAgo(api.status().lastSync) : 'Nur auf diesem Gerät') : 'Noch leer');
-  const tiles = await Promise.all(ADDONS.filter((a) => !a.hidden).map(async (a) => {
-    const api = await openAddon(a.id);
-    const sub = h('small.muted', subText(api));
-    subs.set(a.id, [api, sub]);
-    return h('a.ad-tile', { href: '#/a/' + a.id, style: { '--c': a.color } }, h('span.ad-tile-i', icon(a.icon)), h('b', a.title), sub);
+  await loadLayout();
+  const tiles = await Promise.all(hubList().map(async (f) => {
+    const a = addonById(f.id);
+    let sub = null;
+    if (a) {
+      const api = await openAddon(a.id);
+      sub = h('small.muted', subText(api));
+      subs.set(a.id, [api, sub]);
+    } else sub = h('small.muted', f.id === 'nas' ? 'Dateien in der Cloud' : 'Dokumente scannen');
+    return h('a.ad-tile', { href: f.href, style: { '--c': f.color } }, h('span.ad-tile-i', icon(f.icon)), h('b', f.title), sub);
   }));
+  const bad = [...subs].map(([id, [api]]) => [addonById(id), api.status()]).filter(([, st]) => st.error);
   clear(view).append(h('div.page.ios.ad-page',
     ...head('Orbit'),
     h('div.ad-orbit', { hidden: !animated() }, h('i'), h('i'), h('i')),
     h('div.ad-tiles' + (animated() ? '.anim' : ''), tiles),
-    h('section.ad-card', h('b', 'Alte Daten übernehmen'), h('p.muted', 'Export-Dateien aus dem alten Orbit (Daten-Fuel-Tracker.zip, Daten-Notizen.zip, Daten-Reisen.zip) einlesen.'),
-      h('button.btn', { onclick: () => go('#/einstellungen') }, 'Einstellungen › Daten aus Orbit-Export importieren')),
-    !pass ? h('section.ad-card', h('b', 'Daten mit dem PC abgleichen'),
-      h('p.muted', 'Am PC in Orbit unter Einstellungen › Add-on-Optionen bei jedem Add-on „Online-Abgleich“ einschalten und ein Sync-Passwort wählen. Hier dasselbe Passwort eintragen.'),
-      h('button.btn.primary', { onclick: () => go('#/einstellungen') }, 'Zu den Einstellungen')) : null));
+    bad.length ? h('p.err-text.small', 'Abgleich-Problem bei ' + bad.map(([a]) => a.title).join(', ') + ' – Details unter Einstellungen.') : null));
   view.scrollTop = 0;
   const off = onAddon((aid) => { const e = subs.get(aid); if (e) e[1].textContent = subText(e[0]); });
   current = { id: null, off };

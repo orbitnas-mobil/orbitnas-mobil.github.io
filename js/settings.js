@@ -17,6 +17,7 @@ import { APP_VERSION } from './version.js';
 import { loadPrefs, pref, setPrefs } from './addons/prefs.js';
 import { formSheet, parseNum } from './addons/ui.js';
 import { deleteSecret } from './secrets.js';
+import { features, hubList, tabList, loadLayout, saveLayout, MAX_TABS } from './layout.js';
 import { ADDONS, resetCloudSync, overwriteCloudFromHere, getSyncPass, setSyncPass, syncAddon, openAddon, importExportZip } from './addons/store.js';
 
 const group = (title, foot, ...rows) => h('section.group', title ? h('h2.group-title', title) : null, h('div.group-body', rows), foot ? h('p.group-foot', foot) : null);
@@ -52,6 +53,7 @@ export async function renderSettings(view, parts = []) {
     st.error ? h('div.row.info', h('span.row-main', h('span.row-title.err-text', 'Fehler'), h('small.row-sub', errText(st.error)))) : null,
     main && main.type !== 'demo' ? actRow('Jetzt abgleichen', async () => { await store.syncStore(); toast(store.status.error ? errText(store.status.error) : 'Abgeglichen', store.status.error ? 'err' : ''); rerender(); }) : null));
 
+  page.append(...await orbitGroup(rerender));
   page.append(await addonPrefsGroup(rerender));
   page.append(await addonsGroup(rerender));
   page.append(appearance(rerender));
@@ -173,13 +175,48 @@ async function checkUpdate() {
   if (reg.waiting || reg.installing) toast('Neue Version wird geladen …'); else toast('Du hast die neueste Version.');
 }
 
+// Aufbau dieses Geräts: untere Leiste und Startseite „Orbit“ (nur hier, wird nicht mit dem PC abgeglichen)
+async function orbitGroup(rerender) {
+  const l = await loadLayout();
+  const tabs = tabList().map((t) => t.id);
+  const moveIn = (arr, id, d) => { const i = arr.indexOf(id), j = i + d; if (i < 0 || j < 0 || j >= arr.length) return arr; const a = arr.slice(); [a[i], a[j]] = [a[j], a[i]]; return a; };
+  const arrows = (up, down) => h('span.row-arrows', h('button.link', { 'aria-label': 'Nach oben', onclick: (e) => { e.stopPropagation(); up(); } }, '▲'), h('button.link', { 'aria-label': 'Nach unten', onclick: (e) => { e.stopPropagation(); down(); } }, '▼'));
+  const apply = async (patch) => { await saveLayout(patch); rerender(); };
+  const tabRows = features().filter((f) => !f.fixed).map((f) => ({ f, on: tabs.includes(f.id) }));
+  const ordered = [...tabs.filter((id) => id !== 'einstellungen').map((id) => tabRows.find((r) => r.f.id === id)), ...tabRows.filter((r) => !r.on)].filter(Boolean);
+  const barRows = ordered.map(({ f, on }) => h('div.row.toggle',
+    h('span.srcicon', { style: { background: f.color } }, icon(f.icon)),
+    h('span.row-main', h('span.row-title', f.title)),
+    on ? arrows(() => apply({ tabs: [...moveIn(tabs.filter((i) => i !== 'einstellungen'), f.id, -1), 'einstellungen'] }), () => apply({ tabs: [...moveIn(tabs.filter((i) => i !== 'einstellungen'), f.id, 1), 'einstellungen'] })) : null,
+    h('input.ios-switch', { type: 'checkbox', checked: on, onchange: async (e) => {
+      const cur = tabs.filter((i) => i !== 'einstellungen');
+      if (e.target.checked) { if (cur.length >= MAX_TABS - 1) { e.target.checked = false; toast('Höchstens ' + MAX_TABS + ' Reiter (mit Einstellungen)', 'err'); return; } cur.push(f.id); }
+      else cur.splice(cur.indexOf(f.id), 1);
+      apply({ tabs: [...cur, 'einstellungen'] });
+    } })));
+  const hub = hubList(true);
+  const hubRows = hub.map((f) => h('div.row.toggle',
+    h('span.srcicon', { style: { background: f.color } }, icon(f.icon)),
+    h('span.row-main', h('span.row-title', f.title)),
+    arrows(() => apply({ hubOrder: moveIn(hub.map((x) => x.id), f.id, -1) }), () => apply({ hubOrder: moveIn(hub.map((x) => x.id), f.id, 1) })),
+    h('input.ios-switch', { type: 'checkbox', checked: !l.hubHidden.includes(f.id), onchange: (e) => apply({ hubOrder: hub.map((x) => x.id), hubHidden: e.target.checked ? l.hubHidden.filter((i) => i !== f.id) : [...l.hubHidden, f.id] }) })));
+  return [
+    group('Orbit – untere Leiste', 'Bis zu ' + MAX_TABS + ' Reiter; „Einstellungen“ bleibt immer dabei. Gilt nur auf diesem Gerät.', ...barRows),
+    group('Orbit – Startseite', 'Reihenfolge und Sichtbarkeit der Kacheln. Neue Add-ons erscheinen automatisch am Ende. Gilt nur auf diesem Gerät.', ...hubRows),
+  ];
+}
+
 // Fuel Tracker, Notizen, Reisen, Tresor: Sync-Passwort (dasselbe wie am PC) und Stand je Add-on
 async function addonsGroup(rerender) {
   const pass = await getSyncPass();
   const rows = [];
   for (const a of ADDONS) {
     const api = await openAddon(a.id), st = api.status();
-    rows.push(navRow(a.icon, a.color, a.title, st.error ? errText(st.error) : st.lastSync ? 'Abgeglichen ' + fmtAgo(st.lastSync) : api.hasData() ? 'Nur auf diesem Gerät' : 'Noch leer', () => go('#/a/' + a.id)));
+    rows.push(navRow(a.icon, a.color, a.title + ' jetzt abgleichen', st.error ? errText(st.error) : st.lastSync ? 'Abgeglichen ' + fmtAgo(st.lastSync) : api.hasData() ? 'Nur auf diesem Gerät' : 'Noch leer', async () => {
+      if (!pass) { toast('Erst das Sync-Passwort eintragen', 'err'); return; }
+      try { await syncAddon(a.id); toast(a.title + ': abgeglichen'); } catch (e) { toast(errText(e), 'err'); }
+      rerender();
+    }));
   }
   return group('Orbit-Add-ons (Fuel Tracker, Notizen, Reisen, Tresor)',
     'Die Daten liegen verschlüsselt in der Haupt-Cloud (Ordner .orbitnas/addons) und werden mit Orbit am PC abgeglichen. Dafür am PC pro Add-on „Online-Abgleich“ einschalten und hier dasselbe Sync-Passwort eintragen. Das Passwort bleibt nur auf diesem Gerät.',
