@@ -17,7 +17,7 @@ import { APP_VERSION } from './version.js';
 import { loadPrefs, pref, setPrefs } from './addons/prefs.js';
 import { formSheet, parseNum } from './addons/ui.js';
 import { deleteSecret } from './secrets.js';
-import { ADDONS, resetCloudSync, getSyncPass, setSyncPass, syncAddon, openAddon, importExportZip } from './addons/store.js';
+import { ADDONS, resetCloudSync, overwriteCloudFromHere, getSyncPass, setSyncPass, syncAddon, openAddon, importExportZip } from './addons/store.js';
 
 const group = (title, foot, ...rows) => h('section.group', title ? h('h2.group-title', title) : null, h('div.group-body', rows), foot ? h('p.group-foot', foot) : null);
 const navRow = (ic, color, title, sub, onclick, value = '') => h('button.row', { onclick },
@@ -207,6 +207,12 @@ async function addonsGroup(rerender) {
       });
       document.body.append(inp); inp.click();
     }),
+    pass ? actRow('Cloud mit dem Stand dieses Handys überschreiben …', async () => {
+      if (!(await confirmDialog('Der Stand dieses Handys (Fuel Tracker, Notizen, Reisen, Tresor, Scans) wird zum alleinigen Stand in der Cloud. Was dort bisher liegt, wird ersetzt (die alte Datei bleibt im Ordner „zurueckgesetzt“ erhalten). Am PC danach „Cloud-Stand übernehmen“ wählen, nicht zusammenführen.', { title: 'Cloud überschreiben?', danger: true, ok: 'Weiter' }))) return;
+      if (!(await confirmDialog('Wirklich sicher? Die Cloud-Daten werden jetzt durch den Stand dieses Handys ersetzt.', { title: 'Zweite Bestätigung', danger: true, ok: 'Ja, überschreiben' }))) return;
+      try { const n = await overwriteCloudFromHere(); toast(`Fertig: ${n} Add-on(s) in die Cloud geschrieben`); } catch (e) { toast('Nicht möglich: ' + errText(e), 'err'); }
+      rerender();
+    }, true) : null,
     actRow('Passwort vergessen – Abgleich zurücksetzen …', async () => {
       if (!(await confirmDialog('Die verschlüsselten Abgleichdateien aller Add-ons in der Cloud (Ordner .orbitnas/addons) werden beiseitegelegt – ohne das alte Passwort kann sie niemand lesen. Deine Daten auf diesem Gerät bleiben und werden mit einem neuen Sync-Passwort wieder hochgeladen. Daten, die nur am PC liegen, kommen erst zurück, wenn du dort ebenfalls zurücksetzt und dasselbe neue Passwort einträgst.', { title: 'Abgleich zurücksetzen?', danger: true, ok: 'Zurücksetzen' }))) return;
       try { await resetCloudSync(); } catch (e) { toast('Zurücksetzen nicht möglich: ' + errText(e), 'err'); rerender(); return; }
