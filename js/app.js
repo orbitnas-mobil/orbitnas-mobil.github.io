@@ -3,7 +3,7 @@
 
 import { h, icon, toast, clear } from './util.js';
 import { persist } from './db.js';
-import { loadSettings, route, go, unlocked, isWide, applyTheme, dirHash } from './ui.js';
+import { loadSettings, route, go, unlocked, isWide, applyTheme, dirHash, isStandalone } from './ui.js';
 import { loadLock, lockEnabled, showLockScreen, lockImmediately } from './lock.js';
 import { loadConnections, connections, onConnections, source, addConnection } from './sources/registry.js';
 import { initStore, syncStore, onStore, autoLockMinutes } from './store.js';
@@ -207,7 +207,10 @@ function movedNotice() {
   try { oauth = await handleRedirect(); } catch (e) { oauth = { error: e.message + (e.detail ? ` (${e.detail})` : '') }; }
   document.getElementById('splash')?.remove();
   if (connections().length && lockEnabled()) await showLockScreen();
-  if (!location.hash || !/^#\/(orte|d|alle|zuletzt|favoriten|a|einstellungen|suche|fritz)/.test(location.hash)) history.replaceState(null, '', '#/a');
+  // Beim Kaltstart der App (neue Sitzung) immer in den Orbit-Reiter, auch wenn das Home-Bildschirm-Symbol noch die alte Startadresse (#/orte) gespeichert hat
+  let fresh = false;
+  try { fresh = !sessionStorage.getItem('started'); sessionStorage.setItem('started', '1'); } catch { /* Safari privat */ }
+  if (!location.hash || (fresh && isStandalone() && !/^#\/(einstellungen)/.test(location.hash) && !oauth) || !/^#\/(orte|d|alle|zuletzt|favoriten|a|einstellungen|suche|fritz)/.test(location.hash)) history.replaceState(null, '', '#/a');
   await render();
   if (oauth) await finishOAuth(oauth);
   if (connections().length) {
