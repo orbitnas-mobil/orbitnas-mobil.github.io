@@ -5,7 +5,8 @@ import { h, icon, toast, actionSheet, confirmDialog, sheet } from '../util.js';
 import { head, formSheet, newId } from './ui.js';
 import { syncAddon } from './store.js';
 import { pref } from './prefs.js';
-import { checkFaceId, lock } from '../lock.js';
+import { checkCredential } from '../lock.js';
+import { kv } from '../db.js';
 import { saveSecret, loadSecret, deleteSecret } from '../secrets.js';
 
 const CATS = ['Allgemein', 'Finanzen', 'Streaming', 'Arbeit', 'Online', 'Bank', 'E-Mail', 'Sonstiges'];
@@ -48,7 +49,8 @@ export async function encryptVault(keys, hdr, entries) {
 
 // ---------------------------------------------------------------- Sitzung (nur im Arbeitsspeicher)
 
-const S = { keys: null, salt: null, entries: [], last: 0, q: '', timer: null, away: 0 };
+const S = { keys: null, salt: null, entries: [], last: 0, q: '', timer: null, away: 0, faceId: null };
+export const VAULT_FACE_KEY = 'vault:face';
 function lockNow() { S.keys = null; S.salt = null; S.entries = []; S.q = ''; clearInterval(S.timer); S.timer = null; }
 const touch = () => { S.last = Date.now(); };
 document.addEventListener('visibilitychange', () => {
@@ -61,6 +63,7 @@ export const vaultUnlocked = () => !!S.keys;
 export function lockVault() { lockNow(); }
 
 export async function render(el, api, nav) {
+  try { S.faceId = (await kv.get(VAULT_FACE_KEY))?.id || null; } catch { S.faceId = null; }
   const hdr = api.get('vault', null);
   const page = h('div.ad-page');
   el.append(page);
@@ -117,20 +120,20 @@ export async function render(el, api, nav) {
         if (viaFace) { await deleteSecret('vaultPw'); fail('Das Master-Passwort hat sich geändert. Bitte einmal von Hand eingeben.'); } else { fail('Falsches Master-Passwort.'); pw.select(); }
         return false;
       }
-      if (pref('vaultFace') && lock.faceId && !viaFace) { try { await saveSecret('vaultPw', { pw: password }); } catch { /* egal */ } }
+      if (pref('vaultFace') && S.faceId && !viaFace) { try { await saveSecret('vaultPw', { pw: password }); } catch { /* egal */ } }
       S.keys = keys; S.salt = hdr.salt; S.entries = list; touch();
       nav.redraw();
       return true;
     }
     const face = async () => {
       try {
-        if (!(await checkFaceId())) return;
+        if (!(await checkCredential(S.faceId))) return;
         const s = await loadSecret('vaultPw');
         if (!s?.pw) { fail('Beim ersten Mal das Master-Passwort von Hand eingeben, danach geht es mit Face ID.'); return; }
         await open(s.pw, true);
       } catch (e) { if (e.name !== 'NotAllowedError') fail('Face ID: ' + (e.message || e)); }
     };
-    const faceOn = pref('vaultFace') && !!lock.faceId;
+    const faceOn = pref('vaultFace') && !!S.faceId;
     page.append(h('form.ad-lock', {
       onsubmit: async (e) => {
         e.preventDefault();

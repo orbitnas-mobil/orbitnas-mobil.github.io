@@ -142,3 +142,5 @@ input[type=date].input { min-height: 42px; }
 @keyframes ad-float { 50% { transform: translateY(-3px); } }
 @media (prefers-reduced-motion: reduce) { .ad-orbit i, .ad-tiles.anim .ad-tile, .ad-tiles.anim .ad-tile-i { animation: none !important; opacity: 1; } }
 .row-arrows{display:inline-flex;gap:2px;margin-right:6px}.row-arrows .link{padding:4px 8px;font-size:14px}
+/* Während getippt wird, ruhen alle Dauer-Animationen (kein Zittern beim Cursor) */
+html.typing *, html.typing *::before, html.typing *::after { animation-play-state: paused !important; }

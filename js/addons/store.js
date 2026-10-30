@@ -145,6 +145,7 @@ export async function openAddon(id) {
     raw: (key) => a.data[key] ?? null,
     async set(key, value) {
       if (a.readOnly) throw new Error('Diese Daten stammen aus einer neueren Version von Orbit. Bitte erst die App aktualisieren.');
+      snapshotLocal(a.pc, a.data).catch(() => {});
       a.data[key] = typeof value === 'string' ? value : js(value);
       if (!has(a.data, 'dataVersion')) a.data.dataVersion = String(DATA_VERSION);
       a.rev++; a.lastEdit = Date.now();
@@ -183,8 +184,9 @@ export async function setSyncPass(pass) {
 // ---------------------------------------------------------------- Abgleich
 
 // Quelle und Ordner des Abgleichs (nur auf diesem Gerät): Geräte mit demselben Ordner gleichen sich untereinander ab.
-let syncLoc = { cloudId: null, folder: '.orbitnas' };
-export const normFolder = (f) => { const t = String(f || '').replace(/\\/g, '/').split('/').map((x) => x.trim()).filter(Boolean).join('/'); return t || '.orbitnas'; };
+export const DEFAULT_FOLDER = 'Orbit_NAS/Orbit Struktur/Einstellungs Sync';
+let syncLoc = { cloudId: null, folder: DEFAULT_FOLDER };
+export const normFolder = (f) => { const t = String(f || '').replace(/\\/g, '/').split('/').map((x) => x.trim()).filter(Boolean).join('/'); return t || DEFAULT_FOLDER; };
 export async function loadSyncLoc() { const s = await kv.get('addon:sync'); if (s) syncLoc = { cloudId: s.cloudId || null, folder: normFolder(s.folder) }; return syncLoc; }
 export const getSyncLoc = () => syncLoc;
 /** Quelle/Ordner festlegen. Der gemeinsame Stand wird vergessen, damit der erste Abgleich nur zusammenführt (nichts gilt als „gelöscht“). */
@@ -206,6 +208,18 @@ async function mainSrc() {
   if (!c || c.type === 'demo') return null;
   return source(c.id);
 }
+
+/** Quelle des Abgleichs (gewählte Cloud, sonst Haupt-Cloud) – auch für die Einstellungsdatei. */
+export const syncSource = () => mainSrc();
+/** Abgleich-Ordner samt Unterordnern anlegen (Einstellungsdatei liegt direkt darin). */
+export async function ensureSyncFolder(src) {
+  let cur = '';
+  for (const name of syncLoc.folder.split('/')) {
+    try { await src.mkdir(cur || '/', name); } catch { /* gibt es schon */ }
+    cur += '/' + name;
+  }
+}
+export const settingsFilePath = () => '/' + syncLoc.folder + '/einstellungen.json';
 
 async function ensureDirs(src, pc) {
   let cur = '';
@@ -275,6 +289,80 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 window.addEventListener('pagehide', flushPending);
 
 /** Gleicht ein Add-on ab. Gibt { skipped } zurück, wenn kein Sync-Passwort oder keine Cloud da ist. */
+// ---------------------------------------------------------------- Frühere Stände (lokal + Cloud) und Abgleich-Protokoll
+
+const stamp = (d = new Date()) => d.toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+const SNAP_MIN_GAP = 30 * 60 * 1000;
+/** Lokalen Stand des Add-ons sichern (nie gelöscht; höchstens ein automatischer Stand je 30 Minuten). */
+export async function snapshotLocal(pc, data, label = 'Automatisch', force = false) {
+  if (!data || !Object.keys(data).length) return;
+  const list = (await kv.get('snap:' + pc)) || [];
+  const last = list[list.length - 1];
+  if (!force && last && Date.now() - last.t < SNAP_MIN_GAP && JSON.stringify(last.data) === JSON.stringify(data)) return;
+  if (!force && last && Date.now() - last.t < SNAP_MIN_GAP) return;
+  list.push({ t: Date.now(), label, data: { ...data } });
+  await kv.set('snap:' + pc, list);
+}
+export async function localSnapshots(pc) { return ((await kv.get('snap:' + pc)) || []).slice().reverse(); }
+
+const LOG_MAX = 150;
+export async function logSync(id, text, kind = 'info') {
+  try {
+    const l = (await kv.get('sync:log')) || [];
+    l.push({ t: Date.now(), id, text, kind });
+    await kv.set('sync:log', l.slice(-LOG_MAX));
+  } catch { /* egal */ }
+}
+export async function syncLog() { return ((await kv.get('sync:log')) || []).slice().reverse(); }
+
+/** Stände in der Cloud (versionen/*.orbit), neueste zuerst. */
+export async function cloudVersions(id) {
+  const meta = addonById(id);
+  const src = await mainSrc();
+  if (!src) throw new SyncError('Keine Cloud angemeldet.');
+  let items = [];
+  try { items = await src.list(remoteDir(meta.pc) + '/versionen'); } catch { items = []; }
+  return items.filter((x) => /\.orbit$/.test(x.name)).map((x) => ({ name: x.name, path: remoteDir(meta.pc) + '/versionen/' + x.name })).sort((a, b) => (a.name < b.name ? 1 : -1));
+}
+export async function readCloudVersion(path) {
+  const pass = await getSyncPass();
+  if (!pass) throw new SyncError('Bitte zuerst ein Sync-Passwort eintragen.');
+  const src = await mainSrc();
+  const text = await src.readText(path);
+  if (!text) throw new SyncError('Dieser Stand ist nicht mehr lesbar.');
+  const d = await decryptSync(pass, text);
+  const sp = JSON.parse(d.text)?.speicher;
+  return { data: sp && typeof sp === 'object' ? sp : {}, time: d.time };
+}
+/** Früheren Stand wiederherstellen: aktuellen Stand zuerst sichern (lokal + Cloud), dann ersetzen und in die Cloud schreiben. */
+export async function restoreAddon(id, data) {
+  const meta = addonById(id);
+  const api = await openAddon(id), a = api.internal;
+  await snapshotLocal(meta.pc, a.data, 'Vor Wiederherstellung', true);
+  const pass = await getSyncPass();
+  const src = pass ? await mainSrc() : null;
+  if (src) {
+    await ensureDirs(src, meta.pc);
+    const old = await src.readText(remoteFile(meta.pc));
+    if (old != null) await src.writeText(remoteDir(meta.pc) + '/versionen/vor-wiederherstellung-' + stamp() + '.orbit', old);
+  }
+  a.data = { ...data }; checkVersion(a); a.rev++; a.lastEdit = Date.now();
+  if (src) {
+    await src.writeText(remoteFile(meta.pc), await encryptSync(pass, js({ speicher: a.data }), devName()));
+    a.base = { ...a.data }; a.lastSync = Date.now(); a.error = null;
+  }
+  await persist(a); await applyShared(id, a.data); emit(id, 'data');
+  await logSync(id, 'Früherer Stand wiederhergestellt' + (src ? ' und in die Cloud geschrieben' : ' (nur auf diesem Gerät)'), 'warn');
+}
+
+const lastCloudVer = new Map();
+/** Jeden Cloud-Stand (höchstens alle 30 Minuten) als eigene Datei mit Zeitstempel behalten – wird nie gelöscht. */
+async function cloudVersionMaybe(src, pc, text) {
+  if (Date.now() - (lastCloudVer.get(pc) || 0) < SNAP_MIN_GAP) return;
+  lastCloudVer.set(pc, Date.now());
+  await src.writeText(remoteDir(pc) + '/versionen/mobil-' + stamp() + '.orbit', text);
+}
+
 export function syncAddon(id) {
   if (running.has(id)) return running.get(id);
   const p = (async () => {
@@ -309,7 +397,8 @@ export function syncAddon(id) {
           if (!remote) await ensureDirs(src, a.pc);
           const again = await src.readText(remoteFile(a.pc));
           if (again !== remoteText) continue;  // anderes Gerät hat geschrieben: nochmal
-          if (remoteText) { try { await src.writeText(remoteDir(a.pc) + '/versionen/mobil-letzte.orbit', remoteText); } catch { /* nicht schlimm */ } }
+          if (remoteText) { try { await src.writeText(remoteDir(a.pc) + '/versionen/mobil-letzte.orbit', remoteText); await cloudVersionMaybe(src, a.pc, remoteText); } catch { /* nicht schlimm */ } }
+          await snapshotLocal(a.pc, a.data);
           const text = await encryptSync(pass, js({ ...payload, speicher: merged }), devName());
           await src.writeText(remoteFile(a.pc), text);
         }
@@ -321,11 +410,13 @@ export function syncAddon(id) {
         if (conflicts.length) a.conflicts = [...a.conflicts, ...conflicts].slice(-20);
         await persist(a);
         emit(id, changesLocal ? 'data' : 'status');
+        if (changesLocal || changesRemote) await logSync(id, (changesLocal ? 'Daten aus der Cloud übernommen' : '') + (changesLocal && changesRemote ? ', ' : '') + (changesRemote ? 'Daten in die Cloud geschrieben' : '') + (conflicts.length ? ` (${conflicts.length} Konflikt(e))` : ''));
         return { pulled: changesLocal, pushed: changesRemote, conflicts: conflicts.length };
       }
       throw new SyncError('Die Daten ändern sich gerade – wird gleich erneut abgeglichen.');
     } catch (e) {
       a.error = e;
+      logSync(id, 'Fehler: ' + (e?.message || e), 'err');
       if (!(e instanceof SyncError)) scheduleSync(id, 120000);
       throw e;
     } finally {
