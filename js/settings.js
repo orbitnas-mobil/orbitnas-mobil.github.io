@@ -1,7 +1,7 @@
 // Einstellungen als gruppierte Liste wie in iOS. Was in der Einstellungsdatei steht (Design, PIN, Sicherheitsfrage,
 // Auto-Sperre, Auge-Knopf, Ignorierte), gilt auch am PC. Anmeldungen, Face ID und die 24 Stunden bleiben auf diesem Gerät.
 
-import { h, icon, fmtSize, fmtAgo, toast, confirmDialog, promptDialog, clear } from './util.js';
+import { h, icon, fmtSize, fmtAgo, toast, confirmDialog, promptDialog, clear, sheet } from './util.js';
 import { cache, usage, persist } from './db.js';
 import { connections, connById, connByKey, source, removeConnection, renameConnection, mainConnection, PROVIDERS } from './sources/registry.js';
 import * as store from './store.js';
@@ -18,6 +18,7 @@ import { loadPrefs, pref, setPrefs } from './addons/prefs.js';
 import { formSheet, parseNum } from './addons/ui.js';
 import { deleteSecret } from './secrets.js';
 import { features, hubList, tabList, loadLayout, saveLayout, MAX_TABS } from './layout.js';
+import { loadSyncLoc, getSyncLoc, setSyncLoc, normFolder } from './addons/store.js';
 import { ADDONS, resetCloudSync, overwriteCloudFromHere, getSyncPass, setSyncPass, syncAddon, openAddon, importExportZip } from './addons/store.js';
 
 const group = (title, foot, ...rows) => h('section.group', title ? h('h2.group-title', title) : null, h('div.group-body', rows), foot ? h('p.group-foot', foot) : null);
@@ -175,6 +176,38 @@ async function checkUpdate() {
   if (reg.waiting || reg.installing) toast('Neue Version wird geladen …'); else toast('Du hast die neueste Version.');
 }
 
+// Quelle und Ordner für den Abgleich wählen (nur dieses Gerät; Geräte mit demselben Ordner gleichen sich ab)
+async function pickSyncFolder(rerender) {
+  await loadSyncLoc();
+  const loc = getSyncLoc();
+  const conns = connections().filter((c) => c.type !== 'demo');
+  if (!conns.length) { toast('Es ist keine Cloud angemeldet.', 'err'); return; }
+  const sel = h('select.input', conns.map((c) => h('option', { value: c.id, selected: c.id === (loc.cloudId || mainConnection()?.id) }, c.name)));
+  const path = h('input.input', { type: 'text', value: loc.folder, autocapitalize: 'off', autocorrect: 'off', spellcheck: false });
+  const list = h('div.group-body');
+  const msg = h('p.muted.small', '');
+  const load = async () => {
+    msg.textContent = 'Lädt …'; clear(list);
+    try {
+      const src = await source(sel.value);
+      const items = (await src.list('/' + path.value.split('/').map((x) => x.trim()).filter(Boolean).join('/'))).filter((i) => i.isFolder).sort((a, b) => a.name.localeCompare(b.name, 'de'));
+      for (const i of items) list.append(h('button.row', { type: 'button', onclick: () => { path.value = (path.value.trim() ? path.value.replace(/\/+$/, '') + '/' : '') + i.name; load(); } }, h('span.row-main', h('span.row-title', i.name)), icon('chevron', 'chev')));
+      msg.textContent = items.length ? 'Ordner antippen zum Öffnen. Den Pfad oben kannst du auch eintippen.' : 'Keine Unterordner. Der Ordner wird beim Abgleich angelegt, falls es ihn noch nicht gibt.';
+    } catch (e) { msg.textContent = 'Nicht lesbar (wird beim Abgleich angelegt): ' + errText(e); }
+  };
+  sel.addEventListener('change', load);
+  const body = h('div.dialog-body',
+    h('p.muted.small', 'Gilt für alle Add-ons. Geräte mit demselben Ordner gleichen sich ab, ein anderer Ordner ist eine eigene Gruppe. Das musst du auf jedem Gerät einstellen. Beim Wechsel wird nichts gelöscht.'),
+    h('label.ad-field', h('span.ad-label', 'Quelle'), sel),
+    h('label.ad-field', h('span.ad-label', 'Ordner'), path),
+    h('button.btn', { type: 'button', onclick: () => { const p = path.value.split('/').filter(Boolean); p.pop(); path.value = p.join('/'); load(); } }, 'Eine Ebene hoch'),
+    list, msg);
+  const s = sheet(body, { title: 'Abgleich-Ordner' });
+  body.append(h('div.btn-row', h('button.btn', { type: 'button', onclick: () => s.close() }, 'Abbrechen'),
+    h('button.btn.primary', { type: 'button', onclick: async () => { await setSyncLoc(sel.value, path.value); s.close(); toast('Gespeichert. Nächster Abgleich führt dort zusammen.'); rerender(); } }, 'Übernehmen')));
+  load();
+}
+
 // Aufbau dieses Geräts: untere Leiste und Startseite „Orbit“ (nur hier, wird nicht mit dem PC abgeglichen)
 async function orbitGroup(rerender) {
   const l = await loadLayout();
@@ -208,6 +241,7 @@ async function orbitGroup(rerender) {
 
 // Fuel Tracker, Notizen, Reisen, Tresor: Sync-Passwort (dasselbe wie am PC) und Stand je Add-on
 async function addonsGroup(rerender) {
+  await loadSyncLoc();
   const pass = await getSyncPass();
   const rows = [];
   for (const a of ADDONS) {
@@ -221,6 +255,7 @@ async function addonsGroup(rerender) {
   return group('Orbit-Add-ons (Fuel Tracker, Notizen, Reisen, Tresor)',
     'Die Daten liegen verschlüsselt in der Haupt-Cloud (Ordner .orbitnas/addons) und werden mit Orbit am PC abgeglichen. Dafür am PC pro Add-on „Online-Abgleich“ einschalten und hier dasselbe Sync-Passwort eintragen. Das Passwort bleibt nur auf diesem Gerät.',
     infoRow('Sync-Passwort', pass ? 'gesetzt' : 'fehlt'),
+    navRow('folder', '#4F8CFF', 'Abgleich-Ordner wählen …', 'Quelle: ' + (connById(getSyncLoc().cloudId)?.name || mainConnection()?.name || 'keine') + ', Ordner: /' + normFolder(getSyncLoc().folder), () => pickSyncFolder(rerender)),
     actRow(pass ? 'Sync-Passwort ändern …' : 'Sync-Passwort eintragen …', async () => {
       if (pass) {
         const old = await promptDialog('Zur Sicherheit: aktuelles Sync-Passwort eingeben.', '', { title: 'Altes Passwort', ok: 'Weiter' });

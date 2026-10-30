@@ -5,7 +5,7 @@
 
 import { kv } from '../db.js';
 import { saveSecret, loadSecret, deleteSecret } from '../secrets.js';
-import { mainConnection, source, ensureKeys } from '../sources/registry.js';
+import { mainConnection, source, ensureKeys, connById } from '../sources/registry.js';
 import { devName } from '../store.js';
 import { applyShared } from './prefs.js';
 
@@ -182,21 +182,36 @@ export async function setSyncPass(pass) {
 
 // ---------------------------------------------------------------- Abgleich
 
-const remoteDir = (pc) => '/.orbitnas/addons/' + pc;
+// Quelle und Ordner des Abgleichs (nur auf diesem Gerät): Geräte mit demselben Ordner gleichen sich untereinander ab.
+let syncLoc = { cloudId: null, folder: '.orbitnas' };
+export const normFolder = (f) => { const t = String(f || '').replace(/\\/g, '/').split('/').map((x) => x.trim()).filter(Boolean).join('/'); return t || '.orbitnas'; };
+export async function loadSyncLoc() { const s = await kv.get('addon:sync'); if (s) syncLoc = { cloudId: s.cloudId || null, folder: normFolder(s.folder) }; return syncLoc; }
+export const getSyncLoc = () => syncLoc;
+/** Quelle/Ordner festlegen. Der gemeinsame Stand wird vergessen, damit der erste Abgleich nur zusammenführt (nichts gilt als „gelöscht“). */
+export async function setSyncLoc(cloudId, folder) {
+  syncLoc = { cloudId: cloudId || null, folder: normFolder(folder) };
+  await kv.set('addon:sync', syncLoc);
+  for (const m of ADDONS) { const api = await openAddon(m.id); api.internal.base = null; await persist(api.internal); emit(m.id, 'status'); }
+}
+const remoteDir = (pc) => '/' + syncLoc.folder + '/addons/' + pc;
 const remoteFile = (pc) => remoteDir(pc) + '/daten.orbit';
 const running = new Map();
 const timers = new Map();
 
 async function mainSrc() {
   await ensureKeys();
-  const c = mainConnection();
+  await loadSyncLocOnce();
+  const chosen = syncLoc.cloudId ? connById(syncLoc.cloudId) : null;
+  const c = chosen && chosen.type !== 'demo' ? chosen : mainConnection();
   if (!c || c.type === 'demo') return null;
   return source(c.id);
 }
 
 async function ensureDirs(src, pc) {
-  for (const [parent, name] of [['/', '.orbitnas'], ['/.orbitnas', 'addons'], ['/.orbitnas/addons', pc], [remoteDir(pc), 'versionen']]) {
-    try { await src.mkdir(parent, name); } catch { /* gibt es schon */ }
+  let cur = '';
+  for (const name of [...syncLoc.folder.split('/'), 'addons', pc, 'versionen']) {
+    try { await src.mkdir(cur || '/', name); } catch { /* gibt es schon */ }
+    cur += '/' + name;
   }
 }
 
@@ -327,6 +342,8 @@ export async function syncAll() {
   return out;
 }
 
+let locLoaded = false;
+async function loadSyncLocOnce() { if (!locLoaded) { locLoaded = true; await loadSyncLoc(); } }
 let lastAll = 0;
 export function syncSoon() { if (document.visibilityState === 'visible' && Date.now() - lastAll > 15000) { lastAll = Date.now(); syncAll().catch(() => {}); } }
 setInterval(syncSoon, 60000);
