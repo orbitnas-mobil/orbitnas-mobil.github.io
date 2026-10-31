@@ -4,7 +4,8 @@ import { h, icon, clear, fmtAgo, toast } from '../util.js';
 import { go } from '../ui.js';
 import { ADDONS, addonById, openAddon, onAddon, getSyncPass } from './store.js';
 import { lastStand, status as standStatus, onStands } from './stands.js';
-import { saveNow, openLoad } from './stands-ui.js';
+import { saveNow, openLoad, syncNow } from './stands-ui.js';
+import { searchBox } from './search.js';
 import { head } from './ui.js';
 import { loadPrefs, animated } from './prefs.js';
 import { errText } from '../fileops.js';
@@ -39,6 +40,7 @@ export async function renderAddons(view, parts) {
     clear(footer);
     if (!pass) footer.append(h('span', 'Nur auf diesem Gerät. '), h('button.link', { onclick: () => go('#/einstellungen') }, 'Sichern und Laden einrichten'));
     else if (standStatus.busy) footer.append(h('span', 'Sichert …'));
+    else if (standStatus.notice) footer.append(h('span.err-text', 'Sichern pausiert: neuerer Stand vom ' + standStatus.notice.device + '. '), h('button.link', { onclick: () => syncNow() }, 'Zusammenführen'));
     else if (standStatus.error) footer.append(h('span.err-text', 'Sichern: ' + errText(standStatus.error)), h('button.link', { onclick: () => saveNow() }, 'Erneut versuchen'));
     else footer.append(h('span.muted', last?.time ? `Gesichert ${fmtAgo(last.time)}` : 'Noch nicht gesichert'), h('button.link', { onclick: () => saveNow() }, 'Jetzt sichern'));
   };
@@ -81,10 +83,13 @@ async function hub(view) {
   const bad = [...subs].map(([id, [api]]) => [addonById(id), api.status()]).filter(([, st]) => st.error);
   clear(view).append(h('div.page.ios.ad-page',
     ...head('Orbit'),
+    searchBox(),
     h('div.ad-orbit', { hidden: !animated() }, h('i'), h('i'), h('i')),
     h('div.ad-tiles' + (animated() ? '.anim' : ''), tiles),
+    standStatus.notice ? h('div.ad-banner', h('b', 'Automatisches Sichern pausiert'), h('span', `Auf dem Gerät „${standStatus.notice.device}“ liegt ein neuerer Stand (${new Date(standStatus.notice.time).toLocaleString('de-DE')}). Deine Änderungen sind bis dahin nur auf diesem Gerät.`),
+      h('button.btn.primary', { onclick: async () => { if (await syncNow()) hub(view); } }, 'Jetzt zusammenführen')) : null,
+    pass ? h('button.btn.block.primary', { onclick: async () => { if (await syncNow()) hub(view); } }, 'Alles abgleichen') : null,
     pass ? h('div.btn-row', h('button.btn.block', { onclick: () => saveNow() }, 'Jetzt sichern'), h('button.btn.block', { onclick: () => openLoad(() => hub(view)) }, 'Daten laden')) : null,
-    standStatus.notice ? h('p.err-text.small', `Neuerer Stand vom ${standStatus.notice.device} (${new Date(standStatus.notice.time).toLocaleString('de-DE')}). Mit „Daten laden“ übernehmen.`) : null,
     bad.length ? h('p.err-text.small', 'Abgleich-Problem bei ' + bad.map(([a]) => a.title).join(', ') + ' – Details unter Einstellungen.') : null));
   view.scrollTop = 0;
   const off = onAddon((aid) => { const e = subs.get(aid); if (e) e[1].textContent = subText(e[0]); });
