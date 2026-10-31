@@ -126,9 +126,9 @@ export function merge(local, remote, base, localIsNewer, conflicts = []) {
 const mem = new Map();    // pcId → { data, base, rev, lastSync, error, conflicts, readOnly, lastEdit }
 const listeners = new Set();
 export const onAddon = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
-const emit = (id, kind = 'status') => listeners.forEach((fn) => { try { fn(id, kind); } catch (e) { console.error(e); } });
+export const emit = (id, kind = 'status') => listeners.forEach((fn) => { try { fn(id, kind); } catch (e) { console.error(e); } });
 
-async function persist(a) { await kv.set('addon:' + a.pc, { data: a.data, base: a.base, lastSync: a.lastSync, conflicts: a.conflicts, lastEdit: a.lastEdit, meta: a.meta, migrated: a.migrated }); }
+export async function persist(a) { await kv.set('addon:' + a.pc, { data: a.data, base: a.base, lastSync: a.lastSync, conflicts: a.conflicts, lastEdit: a.lastEdit, meta: a.meta, migrated: a.migrated }); }
 
 export async function openAddon(id) {
   const meta = addonById(id);
@@ -165,7 +165,7 @@ export async function openAddon(id) {
   return api;
 }
 
-function checkVersion(a) {
+export function checkVersion(a) {
   const v = Number(a.data.dataVersion);
   a.readOnly = Number.isFinite(v) && v > DATA_VERSION;
 }
@@ -319,7 +319,7 @@ async function pool(tasks, n = 6) {
   await Promise.all(Array.from({ length: Math.min(n, tasks.length) }, async () => { while (i < tasks.length) { const k = i++; out[k] = await tasks[k](); } }));
   return out;
 }
-const mkdirs = async (src, parts) => { let cur = ''; for (const n of parts) { try { await src.mkdir(cur || '/', n); } catch { /* gibt es schon */ } cur += '/' + n; } };
+export const mkdirs = async (src, parts) => { let cur = ''; for (const n of parts) { try { await src.mkdir(cur || '/', n); } catch { /* gibt es schon */ } cur += '/' + n; } };
 
 /** Einzeldateien in der Cloud auflisten. any = es gibt schon welche. */
 async function listRecs(src, pc) {
@@ -535,12 +535,9 @@ export async function restoreAddon(id, data) {
 }
 
 /** Änderung merken: abgeglichen wird erst beim App-Start, per „Jetzt abgleichen“ oder wenn die App in den Hintergrund geht (ein Lauf, eine Anmeldung). */
-export function scheduleSync(id) { timers.set(id, true); }
+export function scheduleSync(id) { timers.set(id, true); import('./stands.js').then((m) => m.markChanged()).catch(() => {}); }
 export const hasPending = () => timers.size > 0;
-/** Wartende Änderungen in EINEM Lauf hochladen, wenn die App verlassen wird. */
-function flushPending() { if (!timers.size) return; const ids = [...timers.keys()]; timers.clear(); syncAll(ids).catch(() => {}); }
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushPending(); });
-window.addEventListener('pagehide', flushPending);
+
 
 const lastCloudVer = new Map();
 /** Jeden Cloud-Stand (höchstens alle 30 Minuten) als eigene Datei mit Zeitstempel behalten – wird nie gelöscht. */
@@ -652,7 +649,7 @@ async function loadSyncLocOnce() { if (!locLoaded) { locLoaded = true; await loa
 let lastAll = Date.now();
 /** Nur nach längerer Abwesenheit (über 15 Minuten) beim Zurückkehren in die App; kein Zeitgeber mehr. */
 export function syncSoon() { if (document.visibilityState === 'visible' && Date.now() - lastAll > 15 * 60000) syncAll().catch(() => {}); }
-document.addEventListener('visibilitychange', syncSoon);
+
 
 // ---------------------------------------------------------------- Import aus dem Orbit-Export (Daten-*.zip)
 

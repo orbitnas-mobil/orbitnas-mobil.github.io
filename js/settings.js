@@ -19,7 +19,9 @@ import { formSheet, parseNum } from './addons/ui.js';
 import { deleteSecret } from './secrets.js';
 import { features, hubList, tabList, loadLayout, saveLayout, MAX_TABS } from './layout.js';
 import { loadSyncLoc, getSyncLoc, setSyncLoc, normFolder, localSnapshots, cloudVersions, readCloudVersion, restoreAddon, snapshotLocal, syncLog } from './addons/store.js';
-import { ADDONS, resetCloudSync, overwriteCloudFromHere, getSyncPass, setSyncPass, syncAddon, syncAll, firstError, syncByHand, openAddon, importExportZip } from './addons/store.js';
+import { getSyncPass, setSyncPass, openAddon, importExportZip } from './addons/store.js';
+import { lastStand, getMirror } from './addons/stands.js';
+import { saveNow, openLoad, openManage, openMirror } from './addons/stands-ui.js';
 
 const group = (title, foot, ...rows) => h('section.group', title ? h('h2.group-title', title) : null, h('div.group-body', rows), foot ? h('p.group-foot', foot) : null);
 const navRow = (ic, color, title, sub, onclick, value = '') => h('button.row', { onclick },
@@ -45,18 +47,10 @@ export async function renderSettings(view, parts = []) {
     h('button.row.add', { onclick: () => openAddCloud() }, h('span.srcicon.plain', icon('plus')), h('span.row-main', h('span.row-title', 'Cloud hinzufügen'))),
     navRow('disk', '#E2001A', 'FRITZ!NAS', (await fritzConfigured()) ? 'Eingerichtet in der App „Dateien“' : 'Einrichten', () => openFritz())));
 
-  // Abgleich der Einstellungen mit dem PC
-  const st = store.status;
-  page.append(group('Abgleich mit dem PC', 'Farben, Symbole, Favoriten, Versteckte, Ignorierte, Schreibschutz, PINs, Sicherheitsfrage und Design stehen in einer versteckten Datei in der Haupt-Cloud. PC und Handy lesen sie alle 2 Minuten. Dateien selbst werden nicht abgeglichen – jedes Gerät greift direkt auf die Clouds zu.',
-    infoRow('Haupt-Cloud', main && main.type !== 'demo' ? main.name : 'keine'),
-    infoRow('Zuletzt gelesen', st.lastRead ? fmtAgo(st.lastRead) : '–'),
-    st.lastWrite ? infoRow('Zuletzt geschrieben', fmtAgo(st.lastWrite)) : null,
-    st.error ? h('div.row.info', h('span.row-main', h('span.row-title.err-text', 'Fehler'), h('small.row-sub', errText(st.error)))) : null,
-    main && main.type !== 'demo' ? actRow('Jetzt abgleichen', async () => { await store.syncStore(); toast(store.status.error ? errText(store.status.error) : 'Abgeglichen', store.status.error ? 'err' : ''); rerender(); }) : null));
+  page.append(await standsGroup(rerender));
 
   page.append(...await orbitGroup(rerender));
   page.append(await addonPrefsGroup(rerender));
-  page.append(await addonsGroup(rerender));
   page.append(appearance(rerender));
   page.append(await security(rerender));
 
@@ -176,46 +170,6 @@ async function checkUpdate() {
   if (reg.waiting || reg.installing) toast('Neue Version wird geladen …'); else toast('Du hast die neueste Version.');
 }
 
-// Frühere Stände (lokal + Cloud) wiederherstellen, Sicherung per Knopf, Abgleich-Protokoll
-const fmtT = (t) => new Date(t).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-const cloudTime = (name) => { const d = /^(\d{4})(\d{2})(\d{2})\.orbit$/.exec(name); if (d) return `${d[3]}.${d[2]}.${d[1]} (Tagesstand)`; const m = /(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/.exec(name); return m ? `${m[3]}.${m[2]}. ${m[4]}:${m[5]}` : name.replace('.orbit', ''); };
-async function historySheet() {
-  const body = h('div');
-  const s = sheet(body, { title: 'Frühere Stände', wide: true });
-  const show = async (meta) => {
-    if (!meta) return home();
-    body.replaceChildren(h('p.muted', 'Lädt …'));
-    let locals = [], clouds = [], cerr = '';
-    try { locals = await localSnapshots(meta.pc); } catch { /* leer */ }
-    try { clouds = await cloudVersions(meta.id); } catch (e) { cerr = errText(e); }
-    const ask = async (label, load) => {
-      if (!(await confirmDialog(`Den Stand „${label}“ von ${meta.title} wiederherstellen? Der jetzige Stand wird vorher gesichert (hier und in der Cloud).`, { title: 'Wiederherstellen?', ok: 'Weiter', danger: true }))) return;
-      if (!(await confirmDialog('Wirklich? Die Daten dieses Add-ons werden durch diesen Stand ersetzt und auch an deine anderen Geräte weitergegeben.', { title: 'Zweite Bestätigung', ok: 'Ja, wiederherstellen', danger: true }))) return;
-      try { const d = await load(); await restoreAddon(meta.id, d.data); toast('Wiederhergestellt.'); s.close(); } catch (e) { toast('Nicht möglich: ' + errText(e), 'err'); }
-    };
-    const row = (t, sub, onclick) => h('button.row', { onclick }, h('span.row-main', h('span.row-title', t), sub ? h('small.row-sub', sub) : null), icon('chevron', 'chev'));
-    body.replaceChildren(
-      h('button.btn', { onclick: () => show(null) }, '‹ Zurück'),
-      h('h3', meta.title),
-      h('button.btn.primary', { onclick: async () => { const api = await openAddon(meta.id); await snapshotLocal(meta.pc, api.internal.data, 'Von Hand', true); toast('Stand gesichert.'); show(meta); } }, 'Jetzt Stand sichern'),
-      h('h4', 'Auf diesem Gerät'),
-      locals.length ? h('div.group-body', locals.map((x) => row(fmtT(x.t), x.label, () => ask(fmtT(x.t), async () => ({ data: x.data }))))) : h('p.muted', 'Noch keine Stände.'),
-      h('h4', 'In der Cloud'),
-      cerr ? h('p.err-text', cerr) : clouds.length ? h('div.group-body', clouds.map((x) => row(cloudTime(x.name), x.name.startsWith('vor-') ? 'Vor einer Wiederherstellung' : /^\d{8}\.orbit$/.test(x.name) ? 'Täglicher Gesamtstand' : x.name.startsWith('mobil-') ? 'Vom Handy gesichert' : x.name, () => ask(cloudTime(x.name), () => readCloudVersion(x.path))))) : h('p.muted', 'Noch keine Stände in der Cloud.'),
-    );
-  };
-  const home = async (_m) => {
-    const log = await syncLog();
-    body.replaceChildren(
-      h('p.muted', 'Stände werden nie automatisch gelöscht. Wähle ein Add-on:'),
-      h('div.group-body', ADDONS.filter((m) => !m.hidden).map((m) => h('button.row', { onclick: () => show(m) }, h('span.row-main', h('span.row-title', m.title)), icon('chevron', 'chev')))),
-      h('h4', 'Abgleich-Protokoll'),
-      log.length ? h('pre.muted', { style: { whiteSpace: 'pre-wrap', fontSize: '12px', maxHeight: '35vh', overflow: 'auto' } }, log.slice(0, 40).map((l) => `${fmtT(l.t)}  ${(ADDONS.find((a) => a.id === l.id)?.title) || l.id}: ${l.text}`).join('\n')) : h('p.muted', 'Noch nichts protokolliert.'),
-    );
-  };
-  home();
-}
-
 // Quelle und Ordner für den Abgleich wählen (nur dieses Gerät; Geräte mit demselben Ordner gleichen sich ab)
 async function pickSyncFolder(rerender) {
   await loadSyncLoc();
@@ -299,39 +253,35 @@ async function orbitGroup(rerender) {
   ];
 }
 
-// Fuel Tracker, Notizen, Reisen, Tresor: Sync-Passwort (dasselbe wie am PC) und Stand je Add-on
-async function addonsGroup(rerender) {
+// Sichern und Laden: Stände (alle Add-ons + Einstellungen in einer Datei), Sync-Passwort, Ordner, Spiegeln
+async function standsGroup(rerender) {
   await loadSyncLoc();
   const pass = await getSyncPass();
-  const rows = [];
-  for (const a of ADDONS) {
-    const api = await openAddon(a.id), st = api.status();
-    rows.push(navRow(a.icon, a.color, a.title + ' jetzt abgleichen', st.error ? errText(st.error) : st.lastSync ? 'Abgeglichen ' + fmtAgo(st.lastSync) : api.hasData() ? 'Nur auf diesem Gerät' : 'Noch leer', async () => {
-      if (!pass) { toast('Erst das Sync-Passwort eintragen', 'err'); return; }
-      try { await syncByHand(a.id); toast(a.title + ': abgeglichen'); } catch (e) { toast(errText(e), 'err'); }
-      rerender();
-    }));
-  }
-  return group('Orbit-Add-ons (Fuel Tracker, Notizen, Reisen, Tresor)',
-    'Die Daten liegen verschlüsselt in der Haupt-Cloud (Ordner .orbitnas/addons) und werden mit Orbit am PC abgeglichen. Dafür am PC pro Add-on „Online-Abgleich“ einschalten und hier dasselbe Sync-Passwort eintragen. Das Passwort bleibt nur auf diesem Gerät.',
+  const last = await lastStand();
+  const mirror = await getMirror();
+  return group('Sichern und Laden',
+    'Ein Stand ist eine verschlüsselte Datei mit allen Add-ons (Fuel Tracker, Notizen, Reisen, Tresor, Scans) und allen Einstellungen. „Jetzt sichern“ legt einen neuen Stand an und überschreibt nie einen alten. „Daten laden“ ersetzt die Daten dieses Geräts durch einen Stand deiner Wahl. Nach jeder Änderung wird automatisch gesichert. Das Passwort bleibt nur auf diesem Gerät.',
     infoRow('Sync-Passwort', pass ? 'gesetzt' : 'fehlt'),
-    navRow('clock', '#F59E0B', 'Frühere Stände & Protokoll', 'Wiederherstellen, Stand sichern, Abgleich-Verlauf', historySheet),
-    navRow('folder', '#4F8CFF', 'Abgleich-Ordner wählen …', 'Quelle: ' + (connById(getSyncLoc().cloudId)?.name || mainConnection()?.name || 'keine') + ', Ordner: /' + normFolder(getSyncLoc().folder), () => pickSyncFolder(rerender)),
+    infoRow('Letzter Stand', last?.time ? fmtAgo(last.time) : '–'),
+    actRow('Jetzt sichern', async () => { await saveNow(); rerender(); }),
+    actRow('Daten laden …', () => openLoad(rerender)),
+    navRow('clock', '#F59E0B', 'Stände verwalten', 'Ansehen, löschen, Älteres aufräumen', () => openManage()),
+    navRow('cloud', '#34C759', 'Zusätzlich spiegeln', mirror ? 'In ' + (connById(mirror.cloudId)?.name || '?') + ' / ' + mirror.folder : 'Aus', () => openMirror(rerender)),
+    navRow('folder', '#4F8CFF', 'Ordner der Stände wählen …', 'Quelle: ' + (connById(getSyncLoc().cloudId)?.name || mainConnection()?.name || 'keine') + ', Ordner: /' + normFolder(getSyncLoc().folder), () => pickSyncFolder(rerender)),
     actRow(pass ? 'Sync-Passwort ändern …' : 'Sync-Passwort eintragen …', async () => {
       if (pass) {
         const old = await promptDialog('Zur Sicherheit: aktuelles Sync-Passwort eingeben.', '', { title: 'Altes Passwort', ok: 'Weiter' });
         if (old == null) return;
         if (old !== pass) { toast('Das alte Passwort stimmt nicht.', 'err'); return; }
       }
-      const p = await promptDialog('Dasselbe Passwort wie in Orbit am PC (Einstellungen › Add-on-Optionen).', '', { title: pass ? 'Neues Sync-Passwort' : 'Sync-Passwort', ok: 'Speichern' });
+      const p = await promptDialog('Dasselbe Passwort wie in Orbit am PC (Einstellungen › Sicherheit und Backup). Stände mit einem anderen Passwort lassen sich nicht laden.', '', { title: pass ? 'Neues Sync-Passwort' : 'Sync-Passwort', ok: 'Speichern' });
       if (p == null || !p) return;
       if (pass) { const p2 = await promptDialog('Neues Passwort zur Kontrolle noch einmal eingeben.', '', { title: 'Wiederholen', ok: 'Speichern' }); if (p2 !== p) { toast('Die beiden Eingaben passen nicht zusammen.', 'err'); return; } }
       await setSyncPass(p);
-      toast('Gespeichert. Gleiche ab …');
-      const bad = firstError(await syncAll());
-      toast(bad ? errText(bad) : 'Abgeglichen', bad ? 'err' : '');
+      toast('Gespeichert');
       rerender();
     }),
+    pass ? actRow('Sync-Passwort entfernen', async () => { await setSyncPass(''); rerender(); }, true) : null,
     actRow('Daten aus Orbit-Export importieren …', () => {
       const inp = h('input', { type: 'file', multiple: true, accept: '.zip,application/zip', hidden: true });
       inp.addEventListener('change', async () => {
@@ -344,31 +294,7 @@ async function addonsGroup(rerender) {
         rerender();
       });
       document.body.append(inp); inp.click();
-    }),
-    pass ? actRow('Cloud mit dem Stand dieses Handys überschreiben …', async () => {
-      if (!(await confirmDialog('Der Stand dieses Handys (Fuel Tracker, Notizen, Reisen, Tresor, Scans) wird zum alleinigen Stand in der Cloud. Was dort bisher liegt, wird ersetzt (die alte Datei bleibt im Ordner „zurueckgesetzt“ erhalten). Am PC danach „Cloud-Stand übernehmen“ wählen, nicht zusammenführen.', { title: 'Cloud überschreiben?', danger: true, ok: 'Weiter' }))) return;
-      if (!(await confirmDialog('Wirklich sicher? Die Cloud-Daten werden jetzt durch den Stand dieses Handys ersetzt.', { title: 'Zweite Bestätigung', danger: true, ok: 'Ja, überschreiben' }))) return;
-      try { const n = await overwriteCloudFromHere(); toast(`Fertig: ${n} Add-on(s) in die Cloud geschrieben`); } catch (e) { toast('Nicht möglich: ' + errText(e), 'err'); }
-      rerender();
-    }, true) : null,
-    actRow('Passwort vergessen – Abgleich zurücksetzen …', async () => {
-      if (!(await confirmDialog('Die verschlüsselten Abgleichdateien aller Add-ons in der Cloud (Ordner .orbitnas/addons) werden beiseitegelegt – ohne das alte Passwort kann sie niemand lesen. Deine Daten auf diesem Gerät bleiben und werden mit einem neuen Sync-Passwort wieder hochgeladen. Daten, die nur am PC liegen, kommen erst zurück, wenn du dort ebenfalls zurücksetzt und dasselbe neue Passwort einträgst.', { title: 'Abgleich zurücksetzen?', danger: true, ok: 'Zurücksetzen' }))) return;
-      try { await resetCloudSync(); } catch (e) { toast('Zurücksetzen nicht möglich: ' + errText(e), 'err'); rerender(); return; }
-      const p = await promptDialog('Neues Sync-Passwort (dasselbe wie am PC nach dem Zurücksetzen dort).', '', { title: 'Neues Sync-Passwort', ok: 'Speichern' });
-      if (p) {
-        await setSyncPass(p);
-        const bad = firstError(await syncAll());
-        toast(bad ? errText(bad) : 'Zurückgesetzt und neu abgeglichen', bad ? 'err' : '');
-      } else toast('Zurückgesetzt. Ohne neues Passwort ruht der Abgleich.');
-      rerender();
-    }, true),
-    pass ? actRow('Sync-Passwort entfernen', async () => { await setSyncPass(''); rerender(); }, true) : null,
-    pass ? actRow('Jetzt alle abgleichen', async () => {
-      const bad = firstError(await syncAll());
-      toast(bad ? errText(bad) : 'Abgeglichen', bad ? 'err' : '');
-      rerender();
-    }) : null,
-    ...rows);
+    }));
 }
 
 // Einstellungen für Startbildschirm, Fuel Tracker, Notizen und Tresor (nur auf diesem Gerät)
