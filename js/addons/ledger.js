@@ -11,6 +11,7 @@ import { diff, fold, materialize, countDiff } from './ledger-core.js';
 export const DIR = 'Kassenbuch';
 const KEY = 'ledger';
 const SEP = '\u0001';
+const KNOWN = new Set(ADDONS.map((m) => m.pc));
 export const status = { busy: false, error: null, lastSync: 0, bulk: [], pending: false };
 const listeners = new Set();
 export const onLedger = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
@@ -114,6 +115,7 @@ export function syncNow(opts = {}) {
         for (const k of opts.restore || []) skip.delete(k);
         const state = fold(allEntries(l));
         const out = materialize(state, cur, skip);
+        for (const pc of Object.keys(out)) if (!KNOWN.has(pc)) delete out[pc];   // Add-ons, die es nur am PC gibt, nicht anfassen
         // inzwischen am Gerät geändert? Dann noch einmal von vorn, damit nichts überschrieben wird
         const cur2 = (await collect()).addons;
         if (JSON.stringify(cur2) !== JSON.stringify(cur)) { await save(l); continue; }
