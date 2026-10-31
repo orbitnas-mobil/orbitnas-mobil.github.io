@@ -2,7 +2,9 @@
 
 import { h, icon, clear, fmtAgo, toast } from '../util.js';
 import { go } from '../ui.js';
-import { ADDONS, addonById, openAddon, syncAddon, syncAll, firstError, hasPending, syncByHand, onAddon, getSyncPass } from './store.js';
+import { ADDONS, addonById, openAddon, onAddon, getSyncPass } from './store.js';
+import { lastStand, status as standStatus, onStands } from './stands.js';
+import { saveNow, openLoad } from './stands-ui.js';
 import { head } from './ui.js';
 import { loadPrefs, animated } from './prefs.js';
 import { errText } from '../fileops.js';
@@ -33,13 +35,12 @@ export async function renderAddons(view, parts) {
   let drawing = 0, again = false;
   const nav = { hub: () => go('#/a'), redraw: () => draw(), meta };
   const paintFooter = async () => {
-    const st = api.status(), pass = await getSyncPass();
+    const pass = await getSyncPass(), last = await lastStand();
     clear(footer);
-    if (!pass) footer.append(h('span', 'Nur auf diesem Gerät. '), h('button.link', { onclick: () => go('#/einstellungen') }, 'Abgleich mit dem PC einrichten'));
-    else if (st.busy) footer.append(h('span', 'Gleicht ab …'));
-    else if (st.error) footer.append(h('span.err-text', 'Abgleich: ' + errText(st.error)), h('button.link', { onclick: () => syncByHand(id).catch(() => {}) }, 'Erneut versuchen'));
-    else footer.append(h('span.muted', st.lastSync ? `Abgeglichen ${fmtAgo(st.lastSync)}` : 'Noch nicht abgeglichen'), h('button.link', { onclick: () => syncByHand(id).then(() => toast('Abgeglichen')).catch((e) => toast(errText(e), 'err')) }, 'Jetzt'));
-    if (st.conflicts) footer.append(h('span.muted', ` · ${st.conflicts} Konflikt(e) gesichert`));
+    if (!pass) footer.append(h('span', 'Nur auf diesem Gerät. '), h('button.link', { onclick: () => go('#/einstellungen') }, 'Sichern und Laden einrichten'));
+    else if (standStatus.busy) footer.append(h('span', 'Sichert …'));
+    else if (standStatus.error) footer.append(h('span.err-text', 'Sichern: ' + errText(standStatus.error)), h('button.link', { onclick: () => saveNow() }, 'Erneut versuchen'));
+    else footer.append(h('span.muted', last?.time ? `Gesichert ${fmtAgo(last.time)}` : 'Noch nicht gesichert'), h('button.link', { onclick: () => saveNow() }, 'Jetzt sichern'));
   };
   async function draw() {
     const my = ++drawing;
@@ -52,10 +53,12 @@ export async function renderAddons(view, parts) {
     view.scrollTop = top;
     paintFooter();
   }
-  const off = onAddon((aid, kind) => {
+  const off0 = onAddon((aid, kind) => {
     if (aid !== id || !document.body.contains(box)) return;
     if (kind === 'data') draw(); else paintFooter();
   });
+  const off1 = onStands(() => { if (document.body.contains(box)) paintFooter(); });
+  const off = () => { off0(); off1(); };
   current = { id, off, redraw: draw };
   await draw();
 }
@@ -63,7 +66,7 @@ export async function renderAddons(view, parts) {
 async function hub(view) {
   const pass = await getSyncPass();
   const subs = new Map();
-  const subText = (api) => (api.hasData() ? (api.status().lastSync ? 'Abgeglichen ' + fmtAgo(api.status().lastSync) : 'Nur auf diesem Gerät') : 'Noch leer');
+  const subText = (api) => (api.hasData() ? 'Daten vorhanden' : 'Noch leer');
   await loadLayout();
   const tiles = await Promise.all(hubList().map(async (f) => {
     const a = addonById(f.id);
@@ -80,12 +83,8 @@ async function hub(view) {
     ...head('Orbit'),
     h('div.ad-orbit', { hidden: !animated() }, h('i'), h('i'), h('i')),
     h('div.ad-tiles' + (animated() ? '.anim' : ''), tiles),
-    pass ? h('button.btn.block', { onclick: async (ev) => {
-      const b = ev.currentTarget; b.disabled = true; b.textContent = 'Gleiche ab …';
-      const bad = firstError(await syncAll());
-      toast(bad ? errText(bad) : 'Abgeglichen', bad ? 'err' : '');
-      hub(view);
-    } }, 'Jetzt abgleichen') : null,
+    pass ? h('div.btn-row', h('button.btn.block', { onclick: () => saveNow() }, 'Jetzt sichern'), h('button.btn.block', { onclick: () => openLoad(() => hub(view)) }, 'Daten laden')) : null,
+    standStatus.notice ? h('p.err-text.small', `Neuerer Stand vom ${standStatus.notice.device} (${new Date(standStatus.notice.time).toLocaleString('de-DE')}). Mit „Daten laden“ übernehmen.`) : null,
     bad.length ? h('p.err-text.small', 'Abgleich-Problem bei ' + bad.map(([a]) => a.title).join(', ') + ' – Details unter Einstellungen.') : null));
   view.scrollTop = 0;
   const off = onAddon((aid) => { const e = subs.get(aid); if (e) e[1].textContent = subText(e[0]); });

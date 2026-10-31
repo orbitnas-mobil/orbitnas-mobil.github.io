@@ -12,7 +12,7 @@ import { renderBrowse, renderFolder, renderRecent, renderSearchAll, renderAll, a
 import { renderSettings } from './settings.js';
 import { renderAddons } from './addons/index.js';
 import { renderScan } from './scan/page.js';
-import { ADDONS, syncAll } from './addons/store.js';
+import { ADDONS } from './addons/store.js';
 import { renderFritz } from './fritz.js';
 import { openAddCloud, finishOAuth } from './addcloud.js';
 import { srcColor } from './fileops.js';
@@ -121,7 +121,7 @@ let knownConns = 0;
 onConnections(() => {
   if (!connections().length) view = null;
   // Neue Cloud: gleich die Einstellungen vom PC holen (wer sich gerade angemeldet hat, muss die PIN nicht sofort eingeben)
-  if (connections().length > knownConns) syncStore();
+  // (kein automatischer Einstellungsabgleich mehr; Stände laden)
   knownConns = connections().length;
   render();
 });
@@ -222,11 +222,8 @@ function movedNotice() {
   if (oauth) await finishOAuth(oauth);
   if (connections().length) {
     // Einstellungen vom PC holen; erst danach weiß die App z. B. Farben und PINs
-    const hadPin = lockEnabled();
-    await syncStore();
-    if (!hadPin && lockEnabled()) await showLockScreen();
     for (const c of connections()) source(c.id).catch(() => {});
-    syncAll().catch(() => {});
+    import('./addons/stands.js').then((m) => m.startup()).catch(() => {});
   }
 })();
 

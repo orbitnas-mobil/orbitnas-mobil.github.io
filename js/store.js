@@ -137,6 +137,18 @@ async function changed() {
   dirty = true;
   await saveLocal();
   emit();
+  import('./addons/stands.js').then((m) => m.markChanged()).catch(() => {});
+}
+
+/** Stand aus einer gesicherten Datei übernehmen: alle Einträge gelten als „jetzt“ geändert. */
+export async function replaceDoc(d) {
+  const t = now();
+  const x = JSON.parse(JSON.stringify(d || { v: 1 }));
+  for (const k of SINGLES) if (x[k]) x[k].t = t;
+  for (const e of Object.values(x.sourceColors || {})) if (e) e.t = t;
+  for (const k of LISTS) for (const e of x[k] || []) e.t = t;
+  doc = x; dirty = false; firstDone = true;
+  await saveLocal(); emit();
 }
 
 // ---------------------------------------------------------------- Lesen für die Oberfläche
@@ -233,9 +245,3 @@ export async function forgetPaths(cloud, path) {
   if (any) await changed();
 }
 
-// Abgleich nur beim App-Start, per „Jetzt abgleichen“ und nach längerer Abwesenheit (über 15 Minuten) – kein Zeitgeber mehr
-let hiddenSince = 0;
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden') { hiddenSince = Date.now(); if (dirty) syncStore(); }
-  else if (hiddenSince && Date.now() - hiddenSince > 15 * 60000) syncStore();
-});
