@@ -535,7 +535,7 @@ export async function restoreAddon(id, data) {
 }
 
 /** Änderung merken: abgeglichen wird erst beim App-Start, per „Jetzt abgleichen“ oder wenn die App in den Hintergrund geht (ein Lauf, eine Anmeldung). */
-export function scheduleSync(id) { timers.set(id, true); import('./stands.js').then((m) => m.markChanged()).catch(() => {}); }
+export function scheduleSync(id) { timers.set(id, true); import('./ledger.js').then((m) => m.markChanged()).catch(() => {}); }
 export const hasPending = () => timers.size > 0;
 
 

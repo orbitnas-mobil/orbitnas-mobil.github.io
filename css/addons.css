@@ -162,3 +162,7 @@ html.typing *, html.typing *::before, html.typing *::after { animation-play-stat
 .ad-banner { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; padding: 14px 16px; border-radius: var(--rl); background: color-mix(in srgb, #F59E0B 14%, var(--surface)); border: 1px solid color-mix(in srgb, #F59E0B 55%, var(--border)); }
 .ad-banner span { font-size: .92em; }
 .ad-page > .btn.block.primary { margin-top: 12px; width: 100%; }
+
+/* 5.0.0: näher am PC-Programm – Karten mit leichtem Farbverlauf, Überschriften als Großbuchstaben mit Farbbalken */
+.ad-card, .ad-tile { background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 10%, var(--surface)), var(--surface) 70%); }
+.ad-card h3 { text-transform: uppercase; letter-spacing: .06em; font-size: 12.5px; font-weight: 700; border-left: 3px solid var(--accent); padding-left: 8px; }

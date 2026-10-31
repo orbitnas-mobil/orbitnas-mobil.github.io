@@ -137,7 +137,7 @@ async function changed() {
   dirty = true;
   await saveLocal();
   emit();
-  import('./addons/stands.js').then((m) => m.markChanged()).catch(() => {});
+  import('./addons/ledger.js').then((m) => m.markChanged()).catch(() => {});
 }
 
 /** Stand aus einer gesicherten Datei übernehmen: alle Einträge gelten als „jetzt“ geändert. */
