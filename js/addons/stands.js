@@ -7,7 +7,7 @@ import { kv } from '../db.js';
 import { source, connById } from '../sources/registry.js';
 import * as settingsStore from '../store.js';
 import { applyShared } from './prefs.js';
-import { ADDONS, openAddon, persist, emit, checkVersion, mkdirs, merge, snapshotLocal, encryptSync, decryptSync, getSyncPass, getSyncLoc, loadSyncLoc, syncSource, SyncError } from './store.js';
+import { ADDONS, openAddon, persist, emit, checkVersion, mkdirs, snapshotLocal, encryptSync, decryptSync, getSyncPass, getSyncLoc, loadSyncLoc, syncSource, SyncError } from './store.js';
 
 export class StandNewerError extends SyncError {
   constructor(stand) { super(`Auf einem anderen Gerät (${stand.device}) liegt ein neuerer Stand vom ${new Date(stand.time).toLocaleString('de-DE')}.`); this.stand = stand; }
@@ -57,6 +57,7 @@ export async function listStands() {
 }
 
 const lastKey = 'stand:last';
+const baseKey = 'stand:base';   // Daten des zuletzt gesicherten/geladenen Stands = Basis fürs Zusammenführen
 export const lastStand = () => kv.get(lastKey);
 
 /** Neueren Stand eines anderen Geräts suchen (neuer als der, den dieses Gerät zuletzt geladen oder geschrieben hat). */
@@ -83,11 +84,13 @@ export function saveStand({ force = false, auto = false } = {}) {
       const text = await encryptSync(pass, JSON.stringify(data), device(), new Date(t));
       await src.writeText(dirOf(folder) + '/' + name, text);
       await kv.set(lastKey, { name, time: parseName(name).time });
+      await kv.set(baseKey, data.addons);
       await kv.set('stand:dirty', false);
       dirty = false;
       status.lastSave = t; status.error = null; status.notice = null;
       let mirrorError = null;
       try { await mirrorWrite(name, text); } catch (e) { mirrorError = e; }
+      autoPrune().catch(() => {});
       return { name, mirrorError };
     } catch (e) {
       if (e instanceof StandNewerError) status.notice = e.stand; else status.error = e;
@@ -119,16 +122,23 @@ export async function compare(stand) {
 /** Stand übernehmen (ersetzt die Daten) oder – mit merge:true – mit den Daten dieses Geräts zusammenführen. Vorher wird der jetzige Stand lokal gesichert. */
 export async function loadStand(stand, { merge: doMerge = false, data } = {}) {
   const inc = data || (await readStand(stand));
+  const base = doMerge ? ((await kv.get(baseKey)) || null) : null;
+  const newBase = {};
   for (const m of ADDONS) {
+    // Add-ons, die im Stand gar nicht vorkommen, bleiben unverändert (nie leer überschreiben)
+    if (!Object.prototype.hasOwnProperty.call(inc.addons, m.pc)) { const cur = (await openAddon(m.id)).internal.data; if (Object.keys(cur).length) newBase[m.pc] = { ...cur }; continue; }
     const api = await openAddon(m.id), a = api.internal;
     await snapshotLocal(a.pc, a.data, 'Vor Laden', true);
     const incoming = inc.addons[m.pc] || {};
-    a.data = doMerge ? merge(a.data, incoming, null, true) : { ...incoming };
+    // Zusammenführen mit Basis (= zuletzt gesicherter/geladener Stand): so bleiben Löschungen gelöscht
+    a.data = doMerge ? mergeStand(a.data, incoming, base ? (base[m.pc] || {}) : null) : { ...incoming };
+    if (Object.keys(a.data).length) newBase[m.pc] = { ...a.data };
     checkVersion(a); a.rev++; a.lastEdit = Date.now(); a.base = { ...a.data }; a.lastSync = Date.now(); a.error = null;
     await persist(a); await applyShared(m.id, a.data); emit(m.id, 'data');
   }
   if (inc.einstellungen && !doMerge) await settingsStore.replaceDoc(inc.einstellungen);
   await kv.set(lastKey, { name: stand.name, time: stand.time });
+  await kv.set(baseKey, doMerge ? inc.addons : newBase);
   status.notice = null; note();
 }
 
@@ -151,6 +161,41 @@ export async function pruneOlderThan(days) {
   const all = await listStands();
   const limit = Date.now() - days * 86400000;
   return deleteStands(all.slice(3).filter((s) => s.time < limit));
+}
+
+/** Zusammenführen ohne Datenverlust (gleich wie PC StandFile.MergeData):
+ *  – Einträge, die es hier im letzten Stand (base) gab und die hier gelöscht wurden, bleiben gelöscht.
+ *  – Alles andere aus dem fremden Stand kommt dazu; was dort fehlt, wird hier nie gelöscht.
+ *  – Gleiche ID, beide anders: hat sich hier seit base nichts geändert, gilt der fremde Inhalt, sonst der eigene. */
+export function mergeStand(local, remote, base) {
+  const J = (v) => { try { return JSON.parse(v); } catch { return undefined; } };
+  const isRec = (a) => Array.isArray(a) && a.every((x) => x && typeof x === 'object' && x.id != null);
+  const out = { ...local };
+  for (const [k, rv] of Object.entries(remote || {})) {
+    const has = Object.prototype.hasOwnProperty.call(local, k);
+    const inBase = base && Object.prototype.hasOwnProperty.call(base, k);
+    if (!has) { if (!inBase) out[k] = rv; continue; }              // hier gelöscht -> bleibt gelöscht
+    const L = J(local[k]), R = J(rv), B = inBase ? J(base[k]) : undefined;
+    if (isRec(L) && isRec(R)) {
+      const bMap = new Map(isRec(B) ? B.map((x) => [String(x.id), JSON.stringify(x)]) : []);
+      const res = L.map((x) => {
+        const r = R.find((y) => String(y.id) === String(x.id));
+        return r && bMap.get(String(x.id)) === JSON.stringify(x) ? r : x;
+      });
+      const ids = new Set(L.map((x) => String(x.id)));
+      for (const y of R) { const id = String(y.id); if (!ids.has(id) && !bMap.has(id)) { res.push(y); ids.add(id); } }
+      out[k] = JSON.stringify(res);
+    } else if (inBase && local[k] === base[k]) out[k] = rv;            // hier unverändert -> fremde Änderung übernehmen
+  }
+  return out;
+}
+
+/** Nach jedem Sichern: eigene Stände älter als 30 Tage löschen und höchstens 50 eigene behalten; die neuesten 3 bleiben immer. */
+async function autoPrune() {
+  const mine = (await listStands()).filter((s) => s.device === device());
+  const limit = Date.now() - 30 * 86400000;
+  const old = mine.filter((s, i) => i >= 3 && (s.time < limit || i >= 50));
+  if (old.length) await deleteStands(old);
 }
 
 // ---------------------------------------------------------------- Zusätzlich spiegeln
