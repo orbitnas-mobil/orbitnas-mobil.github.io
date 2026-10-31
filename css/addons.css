@@ -154,3 +154,11 @@ html.typing *, html.typing *::before, html.typing *::after { animation-play-stat
 .crop-hint { color: #cfd2e8; text-align: center; font-size: 13px; margin: 8px 14px; }
 .crop-actions { display: flex; gap: 8px; padding: 6px 14px 14px; }
 .crop-actions .btn { flex: 1; }
+
+/* 4.4.0: Suche, Banner bei pausiertem Sichern */
+.ad-search-box { margin: 14px 0 6px; }
+.ad-search { width: 100%; }
+.ad-search-res { margin-top: 8px; }
+.ad-banner { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; padding: 14px 16px; border-radius: var(--rl); background: color-mix(in srgb, #F59E0B 14%, var(--surface)); border: 1px solid color-mix(in srgb, #F59E0B 55%, var(--border)); }
+.ad-banner span { font-size: .92em; }
+.ad-page > .btn.block.primary { margin-top: 12px; width: 100%; }

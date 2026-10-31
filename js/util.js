@@ -258,7 +258,7 @@ export function actionSheet(title, items) {
 export function confirmDialog(text, { title = 'Bitte bestätigen', ok = 'OK', danger = false, cancel = 'Abbrechen' } = {}) {
   return new Promise((resolve) => {
     let done = false;
-    const body = h('div.dialog-body', h('p', text));
+    const body = h('div.dialog-body', h('p', { style: { whiteSpace: 'pre-line' } }, text));
     const s = sheet(body, { title, onClose: () => { if (!done) resolve(false); } });
     body.append(h('div.btn-row',
       cancel ? h('button.btn', { onclick: () => { done = true; s.close(); resolve(false); } }, cancel) : null,

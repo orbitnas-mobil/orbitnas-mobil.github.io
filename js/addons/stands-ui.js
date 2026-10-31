@@ -3,7 +3,7 @@
 import { h, icon, toast, confirmDialog, sheet, clear, fmtSize } from '../util.js';
 import { errText } from '../fileops.js';
 import { connections, mainConnection } from '../sources/registry.js';
-import { saveStand, listStands, compare, loadStand, mergeAndSave, deleteStands, pruneOlderThan, StandNewerError, getMirror, setMirror, status } from './stands.js';
+import { saveStand, syncAll, getLog, listStands, compare, loadStand, mergeAndSave, deleteStands, pruneOlderThan, StandNewerError, getMirror, setMirror, status } from './stands.js';
 
 const fmtT = (t) => new Date(t).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
 const devText = (d) => (d === 'PC' ? 'Vom PC' : 'Vom ' + d);
@@ -26,6 +26,23 @@ export async function saveNow() {
   }
 }
 
+/** Alles abgleichen: neuerer Stand eines anderen Geräts wird zusammengeführt, dann wird gesichert. */
+export async function syncNow() {
+  try {
+    const r = await syncAll();
+    toast((r.merged ? 'Mit Stand vom ' + r.merged.device + ' zusammengeführt und gesichert' : r.name ? 'Gesichert' : 'Schon aktuell') + (r.mirrorError ? ' (Spiegeln fehlgeschlagen)' : ''), r.mirrorError ? 'err' : '');
+    return true;
+  } catch (e) { toast(errText(e), 'err'); return false; }
+}
+
+/** Protokoll: was dieses Gerät wann gesichert, geladen, zusammengeführt oder aufgeräumt hat. */
+export async function openLog() {
+  const l = await getLog();
+  sheet(h('div', l.length ? h('div.group-body', l.map((e) => h('div.row', h('span.row-main', h('span.row-title', e.what), h('small.row-sub', fmtT(e.t) + (e.detail ? ' · ' + e.detail : '')))))) : h('p.muted', 'Noch keine Einträge.')), { title: 'Protokoll', wide: true });
+}
+
+const previewText = (pv) => (pv || []).map((x) => x.skip ? `${x.title}: nicht im Stand, bleibt unverändert` : `${x.title}: ${x.neu} neu, ${x.geaendert} geändert, ${x.weg} entfallen`).join('\n');
+
 const standRow = (s, onclick, extra) => h('button.row', { onclick },
   h('span.row-main', h('span.row-title', fmtT(s.time)), h('small.row-sub', devText(s.device) + (s.size ? ' · ' + fmtSize(s.size) : ''))), extra || icon('chevron', 'chev'));
 
@@ -39,7 +56,8 @@ export async function openLoad(onDone) {
   const pick = async (st) => {
     let cmp;
     try { cmp = await compare(st); } catch (e) { toast(errText(e), 'err'); return; }
-    let text = `Den Stand vom ${fmtT(st.time)} (${devText(st.device)}) laden? Deine jetzigen Daten werden vorher auf diesem Gerät gesichert.`;
+    const pv = previewText(cmp.preview);
+    let text = `Den Stand vom ${fmtT(st.time)} (${devText(st.device)}) laden? Deine jetzigen Daten werden vorher auf diesem Gerät gesichert.` + (pv ? '\n\nGegenüber jetzt:\n' + pv : '\n\nGegenüber jetzt: keine Unterschiede.');
     if (cmp.current >= 4 && cmp.incoming < cmp.current / 2) text = `Achtung: Dieser Stand hat deutlich weniger Daten (${cmp.incoming} statt ${cmp.current} Einträge). ` + text;
     if (!(await confirmDialog(text, { title: 'Stand laden?', ok: 'Laden', danger: cmp.incoming < cmp.current / 2 }))) return;
     try { await loadStand(st, { data: cmp.data }); toast('Stand geladen'); s.close(); onDone && onDone(); } catch (e) { toast(errText(e), 'err'); }

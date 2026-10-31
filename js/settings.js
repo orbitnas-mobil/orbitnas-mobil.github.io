@@ -21,7 +21,7 @@ import { features, hubList, tabList, loadLayout, saveLayout, MAX_TABS } from './
 import { loadSyncLoc, getSyncLoc, setSyncLoc, normFolder, localSnapshots, cloudVersions, readCloudVersion, restoreAddon, snapshotLocal, syncLog } from './addons/store.js';
 import { getSyncPass, setSyncPass, openAddon, importExportZip } from './addons/store.js';
 import { lastStand, getMirror } from './addons/stands.js';
-import { saveNow, openLoad, openManage, openMirror } from './addons/stands-ui.js';
+import { saveNow, openLoad, openManage, openMirror, syncNow, openLog } from './addons/stands-ui.js';
 
 const group = (title, foot, ...rows) => h('section.group', title ? h('h2.group-title', title) : null, h('div.group-body', rows), foot ? h('p.group-foot', foot) : null);
 const navRow = (ic, color, title, sub, onclick, value = '') => h('button.row', { onclick },
@@ -263,8 +263,10 @@ async function standsGroup(rerender) {
     'Ein Stand ist eine verschlüsselte Datei mit allen Add-ons (Fuel Tracker, Notizen, Reisen, Tresor, Scans) und allen Einstellungen. „Jetzt sichern“ legt einen neuen Stand an und überschreibt nie einen alten. „Daten laden“ ersetzt die Daten dieses Geräts durch einen Stand deiner Wahl. Nach jeder Änderung wird automatisch gesichert. Das Passwort bleibt nur auf diesem Gerät.',
     infoRow('Sync-Passwort', pass ? 'gesetzt' : 'fehlt'),
     infoRow('Letzter Stand', last?.time ? fmtAgo(last.time) : '–'),
+    actRow('Alles abgleichen', async () => { await syncNow(); rerender(); }),
     actRow('Jetzt sichern', async () => { await saveNow(); rerender(); }),
     actRow('Daten laden …', () => openLoad(rerender)),
+    navRow('clock', '#8B5CF6', 'Protokoll', 'Was wann gesichert, geladen oder zusammengeführt wurde', () => openLog()),
     navRow('clock', '#F59E0B', 'Stände verwalten', 'Ansehen, löschen, Älteres aufräumen', () => openManage()),
     navRow('cloud', '#34C759', 'Zusätzlich spiegeln', mirror ? 'In ' + (connById(mirror.cloudId)?.name || '?') + ' / ' + mirror.folder : 'Aus', () => openMirror(rerender)),
     navRow('folder', '#4F8CFF', 'Ordner der Stände wählen …', 'Quelle: ' + (connById(getSyncLoc().cloudId)?.name || mainConnection()?.name || 'keine') + ', Ordner: /' + normFolder(getSyncLoc().folder), () => pickSyncFolder(rerender)),

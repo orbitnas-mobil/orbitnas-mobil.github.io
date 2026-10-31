@@ -45,6 +45,52 @@ export async function collect() {
   }
   return { v: 1, addons, einstellungen: settingsStore.getDoc() };
 }
+
+// ---------------------------------------------------------------- Löschmarker (geräteübergreifend)
+// Stand-Feld "geloescht": {<pc-id>: {<schlüssel>: {<eintrag-id>: zeitMs}}}. Ältere Versionen ignorieren das Feld.
+const tombKey = 'stand:tomb';
+const TOMB_DAYS = 120;
+const recIds = (v) => { try { const a = JSON.parse(v); return Array.isArray(a) && a.every((x) => x && typeof x === 'object' && x.id != null) ? a.map((x) => String(x.id)) : null; } catch { return null; } };
+export function unionTomb(a, b) {
+  const out = JSON.parse(JSON.stringify(a || {})), lim = Date.now() - TOMB_DAYS * 86400000;
+  for (const [pc, keys] of Object.entries(b || {})) for (const [k, ids] of Object.entries(keys || {})) for (const [id, t] of Object.entries(ids || {}))
+    if (t > lim) { ((out[pc] ||= {})[k] ||= {}); out[pc][k][id] = Math.max(out[pc][k][id] || 0, t); }
+  for (const keys of Object.values(out)) for (const [k, ids] of Object.entries(keys)) { for (const [id, t] of Object.entries(ids)) if (t <= lim) delete ids[id]; if (!Object.keys(ids).length) delete keys[k]; }
+  return out;
+}
+/** Neue Löschungen seit dem letzten Stand (base) erkennen; wieder vorhandene IDs verlieren ihren Marker. */
+function tombFor(addons, base, old) {
+  const add = {}, now = Date.now();
+  for (const [pc, keys] of Object.entries(base || {})) for (const [k, v] of Object.entries(keys || {})) {
+    const was = recIds(v); if (!was) continue;
+    const cur = new Set(recIds(addons[pc]?.[k]) || []);
+    for (const id of was) if (!cur.has(id)) ((add[pc] ||= {})[k] ||= {})[id] = now;
+  }
+  const t = unionTomb(old, add);
+  for (const [pc, keys] of Object.entries(t)) for (const [k, ids] of Object.entries(keys)) for (const id of recIds(addons[pc]?.[k]) || []) if (ids[id] && !(add[pc]?.[k]?.[id])) {
+    // Eintrag ist (wieder) da und wurde nicht gerade gelöscht -> Marker nur entfernen, wenn er hier neu angelegt wurde (nicht in base)
+    if (!(recIds(base?.[pc]?.[k]) || []).includes(id)) delete ids[id];
+  }
+  return t;
+}
+function applyTomb(data, tombPc) {
+  if (!tombPc) return data;
+  const out = { ...data };
+  for (const [k, ids] of Object.entries(tombPc)) {
+    if (!(k in out)) continue;
+    try { const a = JSON.parse(out[k]); if (Array.isArray(a)) out[k] = JSON.stringify(a.filter((x) => !(x && x.id != null && ids[String(x.id)]))); } catch { /* kein Listenwert */ }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------- Protokoll (nur auf diesem Gerät)
+const logKey = 'stand:log';
+export async function logEntry(what, detail = '') {
+  const l = (await kv.get(logKey)) || [];
+  l.unshift({ t: Date.now(), what, detail });
+  await kv.set(logKey, l.slice(0, 200));
+}
+export const getLog = async () => (await kv.get(logKey)) || [];
 const countOf = (addons) => Object.values(addons || {}).reduce((n, d) => n + Object.values(d).reduce((k, v) => { try { const x = JSON.parse(v); return k + (Array.isArray(x) ? x.length : 1); } catch { return k + 1; } }, 0), 0);
 export const hasData = (c) => Object.keys(c.addons).length > 0;
 
@@ -76,6 +122,8 @@ export function saveStand({ force = false, auto = false } = {}) {
     try {
       const { pass, src, folder } = await ctx();
       const data = await collect();
+      const tomb = tombFor(data.addons, (await kv.get(baseKey)) || null, (await kv.get(tombKey)) || {});
+      if (Object.keys(tomb).length) data.geloescht = tomb;
       if (!hasData(data)) { if (auto) return null; throw new SyncError('Es gibt noch keine Daten zum Sichern.'); }
       if (!force) { const newer = await findNewer(); if (newer) throw new StandNewerError(newer); }
       const t = Math.max(Date.now(), ((await kv.get(lastKey))?.time || 0) + 1000);   // nie denselben Dateinamen zweimal
@@ -85,6 +133,8 @@ export function saveStand({ force = false, auto = false } = {}) {
       await src.writeText(dirOf(folder) + '/' + name, text);
       await kv.set(lastKey, { name, time: parseName(name).time });
       await kv.set(baseKey, data.addons);
+      await kv.set(tombKey, tomb);
+      logEntry(auto ? 'Automatisch gesichert' : 'Gesichert', name).catch(() => {});
       await kv.set('stand:dirty', false);
       dirty = false;
       status.lastSave = t; status.error = null; status.notice = null;
@@ -109,20 +159,52 @@ export async function readStand(stand) {
   const d = await decryptSync(pass, text);
   const j = JSON.parse(d.text);
   if (!j || typeof j !== 'object' || (j.v || 1) > 1) throw new SyncError('Dieser Stand stammt aus einer neueren Version von Orbit. Bitte erst die App aktualisieren.');
-  return { addons: j.addons && typeof j.addons === 'object' ? j.addons : {}, einstellungen: j.einstellungen || null };
+  return { addons: j.addons && typeof j.addons === 'object' ? j.addons : {}, einstellungen: j.einstellungen || null, geloescht: j.geloescht && typeof j.geloescht === 'object' ? j.geloescht : {} };
 }
 
 /** Wie viele Einträge hat der Stand, wie viele hat dieses Gerät? (für die Rückfrage beim Laden eines kleineren Stands) */
 export async function compare(stand) {
   const inc = await readStand(stand);
   const cur = await collect();
-  return { incoming: countOf(inc.addons), current: countOf(cur.addons), data: inc };
+  return { incoming: countOf(inc.addons), current: countOf(cur.addons), data: inc, preview: preview(inc, cur) };
+}
+
+/** Vorschau je Add-on: wie viele Einträge kommen dazu, ändern sich, fallen weg (beim Laden) – gezählt über Listen-Einträge. */
+export function preview(inc, cur) {
+  const out = [];
+  for (const m of ADDONS) {
+    if (!Object.prototype.hasOwnProperty.call(inc.addons, m.pc)) { out.push({ title: m.title, skip: true }); continue; }
+    const I = inc.addons[m.pc] || {}, C = cur.addons[m.pc] || {};
+    let neu = 0, geaendert = 0, weg = 0;
+    for (const k of new Set([...Object.keys(I), ...Object.keys(C)])) {
+      const li = (() => { try { const a = JSON.parse(I[k]); return Array.isArray(a) ? a : null; } catch { return null; } })();
+      const lc = (() => { try { const a = JSON.parse(C[k]); return Array.isArray(a) ? a : null; } catch { return null; } })();
+      if (li && lc && li.every((x) => x && x.id != null) && lc.every((x) => x && x.id != null)) {
+        const mi = new Map(li.map((x) => [String(x.id), JSON.stringify(x)])), mc = new Map(lc.map((x) => [String(x.id), JSON.stringify(x)]));
+        for (const [id, v] of mi) if (!mc.has(id)) neu++; else if (mc.get(id) !== v) geaendert++;
+        for (const id of mc.keys()) if (!mi.has(id)) weg++;
+      } else if (!(k in C)) neu++; else if (!(k in I)) weg++; else if (I[k] !== C[k]) geaendert++;
+    }
+    if (neu || geaendert || weg) out.push({ title: m.title, neu, geaendert, weg });
+  }
+  return out;
+}
+
+/** Alles abgleichen in einem Schritt: neuerer Stand eines anderen Geräts -> zusammenführen und sichern, sonst einfach sichern. */
+export async function syncAll() {
+  const newer = await findNewer();
+  if (newer) { const r = await mergeAndSave(newer); return { merged: newer, ...r }; }
+  const r = await saveStand({ force: false });
+  return { merged: null, ...(r || {}) };
 }
 
 /** Stand übernehmen (ersetzt die Daten) oder – mit merge:true – mit den Daten dieses Geräts zusammenführen. Vorher wird der jetzige Stand lokal gesichert. */
 export async function loadStand(stand, { merge: doMerge = false, data } = {}) {
   const inc = data || (await readStand(stand));
   const base = doMerge ? ((await kv.get(baseKey)) || null) : null;
+  // eigene, noch nicht gesicherte Löschungen mitnehmen, dann mit den Löschmarkern des Stands vereinen
+  const curAddons = (await collect()).addons;
+  const tomb = unionTomb(tombFor(curAddons, (await kv.get(baseKey)) || null, (await kv.get(tombKey)) || {}), inc.geloescht);
   const newBase = {};
   for (const m of ADDONS) {
     // Add-ons, die im Stand gar nicht vorkommen, bleiben unverändert (nie leer überschreiben)
@@ -131,7 +213,7 @@ export async function loadStand(stand, { merge: doMerge = false, data } = {}) {
     await snapshotLocal(a.pc, a.data, 'Vor Laden', true);
     const incoming = inc.addons[m.pc] || {};
     // Zusammenführen mit Basis (= zuletzt gesicherter/geladener Stand): so bleiben Löschungen gelöscht
-    a.data = doMerge ? mergeStand(a.data, incoming, base ? (base[m.pc] || {}) : null) : { ...incoming };
+    a.data = doMerge ? applyTomb(mergeStand(a.data, incoming, base ? (base[m.pc] || {}) : null), tomb[m.pc]) : { ...incoming };
     if (Object.keys(a.data).length) newBase[m.pc] = { ...a.data };
     checkVersion(a); a.rev++; a.lastEdit = Date.now(); a.base = { ...a.data }; a.lastSync = Date.now(); a.error = null;
     await persist(a); await applyShared(m.id, a.data); emit(m.id, 'data');
@@ -139,6 +221,8 @@ export async function loadStand(stand, { merge: doMerge = false, data } = {}) {
   if (inc.einstellungen && !doMerge) await settingsStore.replaceDoc(inc.einstellungen);
   await kv.set(lastKey, { name: stand.name, time: stand.time });
   await kv.set(baseKey, doMerge ? inc.addons : newBase);
+  await kv.set(tombKey, doMerge ? tomb : unionTomb({}, inc.geloescht));
+  logEntry(doMerge ? 'Zusammengeführt' : 'Geladen', stand.name).catch(() => {});
   status.notice = null; note();
 }
 
@@ -195,7 +279,7 @@ async function autoPrune() {
   const mine = (await listStands()).filter((s) => s.device === device());
   const limit = Date.now() - 30 * 86400000;
   const old = mine.filter((s, i) => i >= 3 && (s.time < limit || i >= 50));
-  if (old.length) await deleteStands(old);
+  if (old.length) { await deleteStands(old); logEntry('Aufgeräumt', old.length + ' alte Stände gelöscht').catch(() => {}); }
 }
 
 // ---------------------------------------------------------------- Zusätzlich spiegeln
