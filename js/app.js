@@ -223,7 +223,7 @@ function movedNotice() {
   if (connections().length) {
     // Einstellungen vom PC holen; erst danach weiß die App z. B. Farben und PINs
     for (const c of connections()) source(c.id).catch(() => {});
-    import('./addons/stands.js').then((m) => m.startup()).catch(() => {});
+    import('./addons/ledger.js').then((m) => m.startup()).catch(() => {});
   }
 })();
 

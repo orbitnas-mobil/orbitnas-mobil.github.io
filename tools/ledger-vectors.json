@@ -1,0 +1,69 @@
+{
+ "diff": [
+  { "name": "neu, geaendert, geloescht",
+    "ctx": {"t": 1000, "s": "aa", "d": "PC"},
+    "base": {"n": {"l": "[{\"id\":\"a\",\"x\":1},{\"id\":\"b\",\"x\":1}]", "w": "5"}},
+    "cur":  {"n": {"l": "[{\"id\":\"a\",\"x\":2},{\"id\":\"c\",\"x\":1}]", "w": "6"}},
+    "expect": {"entries": [
+      {"t":1000,"s":"aa","d":"PC","a":"n","k":"l","i":"a","o":"put","v":{"id":"a","x":2}},
+      {"t":1000,"s":"aa","d":"PC","a":"n","k":"l","i":"c","o":"put","v":{"id":"c","x":1}},
+      {"t":1000,"s":"aa","d":"PC","a":"n","k":"l","i":"b","o":"del","v":null},
+      {"t":1000,"s":"aa","d":"PC","a":"n","k":"w","i":null,"o":"set","v":"6"}], "bulk": []}},
+  { "name": "erster Lauf: alles neu; leeres Geraet schreibt nichts",
+    "ctx": {"t": 5, "s": "bb", "d": "iPhone"},
+    "base": {}, "cur": {"n": {"l": "[{\"id\":1}]"}},
+    "expect": {"entries": [{"t":5,"s":"bb","d":"iPhone","a":"n","k":"l","i":"1","o":"put","v":{"id":1}}], "bulk": []}},
+  { "name": "leeres Geraet",
+    "ctx": {"t": 5, "s": "bb", "d": "iPhone"},
+    "base": {}, "cur": {}, "expect": {"entries": [], "bulk": []}},
+  { "name": "Massenloeschung wird nicht gebucht",
+    "ctx": {"t": 9, "s": "cc", "d": "PC"},
+    "base": {"f": {"e": "[{\"id\":1},{\"id\":2},{\"id\":3},{\"id\":4},{\"id\":5}]"}},
+    "cur":  {"f": {"e": "[]"}},
+    "expect": {"entries": [], "bulk": [{"a":"f","k":"e","dels":5,"total":5}]}},
+  { "name": "wenige Loeschungen sind erlaubt",
+    "ctx": {"t": 9, "s": "cc", "d": "PC"},
+    "base": {"f": {"e": "[{\"id\":1},{\"id\":2},{\"id\":3}]"}},
+    "cur":  {"f": {"e": "[{\"id\":1},{\"id\":2}]"}},
+    "expect": {"entries": [{"t":9,"s":"cc","d":"PC","a":"f","k":"e","i":"3","o":"del","v":null}], "bulk": []}},
+  { "name": "Schluessel entfernt",
+    "ctx": {"t": 3, "s": "aa", "d": "PC"},
+    "base": {"n": {"w": "1"}}, "cur": {"n": {}},
+    "expect": {"entries": [{"t":3,"s":"aa","d":"PC","a":"n","k":"w","i":null,"o":"set","v":null}], "bulk": []}}
+ ],
+ "merge": [
+  { "name": "Loeschung vom PC kommt am Handy an, Neues bleibt",
+    "entries": [
+      {"t":1,"s":"aa","d":"PC","a":"n","k":"l","i":"a","o":"put","v":{"id":"a"}},
+      {"t":1,"s":"aa","d":"PC","a":"n","k":"l","i":"b","o":"put","v":{"id":"b"}},
+      {"t":5,"s":"aa","d":"PC","a":"n","k":"l","i":"a","o":"del","v":null},
+      {"t":6,"s":"bb","d":"iPhone","a":"n","k":"l","i":"c","o":"put","v":{"id":"c"}}],
+    "local": {"n": {"l": "[{\"id\":\"b\"},{\"id\":\"a\"}]"}},
+    "expect": {"n": {"l": "[{\"id\":\"b\"},{\"id\":\"c\"}]"}}},
+  { "name": "juengere Buchung gewinnt, bei Gleichstand die groessere Kennung",
+    "entries": [
+      {"t":5,"s":"aa","d":"PC","a":"n","k":"w","i":null,"o":"set","v":"1"},
+      {"t":5,"s":"bb","d":"iPhone","a":"n","k":"w","i":null,"o":"set","v":"2"},
+      {"t":4,"s":"cc","d":"X","a":"n","k":"w","i":null,"o":"set","v":"3"}],
+    "local": {}, "expect": {"n": {"w": "2"}}},
+  { "name": "spaetere Aenderung schlaegt Loeschung",
+    "entries": [
+      {"t":1,"s":"aa","d":"PC","a":"n","k":"l","i":"a","o":"put","v":{"id":"a","x":1}},
+      {"t":2,"s":"aa","d":"PC","a":"n","k":"l","i":"a","o":"del","v":null},
+      {"t":3,"s":"bb","d":"iPhone","a":"n","k":"l","i":"a","o":"put","v":{"id":"a","x":2}}],
+    "local": {}, "expect": {"n": {"l": "[{\"id\":\"a\",\"x\":2}]"}}},
+  { "name": "Schluessel entfernt",
+    "entries": [{"t":3,"s":"aa","d":"PC","a":"n","k":"w","i":null,"o":"set","v":null}],
+    "local": {"n": {"w": "1", "z": "2"}}, "expect": {"n": {"z": "2"}}},
+  { "name": "frueherer Stand bis Zeitpunkt",
+    "until": 2,
+    "entries": [
+      {"t":1,"s":"aa","d":"PC","a":"n","k":"l","i":"a","o":"put","v":{"id":"a"}},
+      {"t":3,"s":"aa","d":"PC","a":"n","k":"l","i":"a","o":"del","v":null}],
+    "local": {}, "expect": {"n": {"l": "[{\"id\":\"a\"}]"}}}
+ ],
+ "count": [
+  { "name": "Vorschau", "cur": {"n": {"l": "[{\"id\":\"a\",\"x\":1},{\"id\":\"e\"}]"}}, "target": {"n": {"l": "[{\"id\":\"a\",\"x\":2},{\"id\":\"d\"}]"}},
+    "expect": {"n": {"neu": 1, "geaendert": 1, "weg": 1}} }
+ ]
+}
