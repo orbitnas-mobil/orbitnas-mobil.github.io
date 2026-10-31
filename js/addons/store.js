@@ -529,12 +529,11 @@ export async function restoreAddon(id, data) {
   await logSync(id, 'Früherer Stand wiederhergestellt' + (src ? ' und in die Cloud geschrieben' : ' (nur auf diesem Gerät)'), 'warn');
 }
 
-export function scheduleSync(id, ms = 3000) {
-  clearTimeout(timers.get(id));
-  timers.set(id, setTimeout(() => { timers.delete(id); syncAddon(id).catch(() => {}); }, ms));
-}
-/** Wartende Änderungen sofort hochladen (z. B. wenn die App in den Hintergrund geht – iOS hält dann Zeitgeber an). */
-function flushPending() { for (const [id, t] of [...timers]) { clearTimeout(t); timers.delete(id); syncAddon(id).catch(() => {}); } }
+/** Änderung merken: abgeglichen wird erst beim App-Start, per „Jetzt abgleichen“ oder wenn die App in den Hintergrund geht (ein Lauf, eine Anmeldung). */
+export function scheduleSync(id) { timers.set(id, true); }
+export const hasPending = () => timers.size > 0;
+/** Wartende Änderungen in EINEM Lauf hochladen, wenn die App verlassen wird. */
+function flushPending() { if (!timers.size) return; const ids = [...timers.keys()]; timers.clear(); syncAll(ids).catch(() => {}); }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushPending(); });
 window.addEventListener('pagehide', flushPending);
 
@@ -608,7 +607,6 @@ export function syncAddon(id, opts = {}) {
       a.error = e;
       if (e instanceof BulkDeleteError) a.guard = true;
       logSync(id, 'Fehler: ' + (e?.message || e), 'err');
-      if (!(e instanceof SyncError)) scheduleSync(id, 120000);
       throw e;
     } finally {
       a.busy = false; running.delete(id); emit(id);
@@ -627,18 +625,28 @@ export async function syncByHand(id) {
   }
 }
 
-export async function syncAll() {
-  const out = {};
-  for (const a of ADDONS) { try { out[a.id] = await syncAddon(a.id); } catch (e) { out[a.id] = { error: e }; } }
-  return out;
+let allRun = null;
+/** Alle Add-ons nacheinander (nie gleichzeitig) abgleichen; bei pCloud-Sperre sofort aufhören. */
+export function syncAll(ids) {
+  if (allRun) return allRun;
+  allRun = (async () => {
+    const out = {};
+    for (const a of ADDONS) {
+      if (ids && !ids.includes(a.id)) continue;
+      try { out[a.id] = await syncAddon(a.id); } catch (e) { out[a.id] = { error: e }; if (e?.code === 4000) break; }
+    }
+    lastAll = Date.now();
+    return out;
+  })().finally(() => { allRun = null; });
+  return allRun;
 }
+export function firstError(res) { return Object.values(res).find((r) => r?.error)?.error || null; }
 
 let locLoaded = false;
 async function loadSyncLocOnce() { if (!locLoaded) { locLoaded = true; await loadSyncLoc(); } }
-let lastAll = 0;
-export function syncSoon() { if (document.visibilityState === 'visible' && Date.now() - lastAll > 15000) { lastAll = Date.now(); syncAll().catch(() => {}); } }
-setInterval(syncSoon, 60000);
-window.addEventListener('online', () => { lastAll = 0; syncSoon(); });
+let lastAll = Date.now();
+/** Nur nach längerer Abwesenheit (über 15 Minuten) beim Zurückkehren in die App; kein Zeitgeber mehr. */
+export function syncSoon() { if (document.visibilityState === 'visible' && Date.now() - lastAll > 15 * 60000) syncAll().catch(() => {}); }
 document.addEventListener('visibilitychange', syncSoon);
 
 // ---------------------------------------------------------------- Import aus dem Orbit-Export (Daten-*.zip)

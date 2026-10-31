@@ -2,7 +2,7 @@
 
 import { h, icon, clear, fmtAgo, toast } from '../util.js';
 import { go } from '../ui.js';
-import { ADDONS, addonById, openAddon, syncAddon, syncByHand, onAddon, getSyncPass } from './store.js';
+import { ADDONS, addonById, openAddon, syncAddon, syncAll, firstError, hasPending, syncByHand, onAddon, getSyncPass } from './store.js';
 import { head } from './ui.js';
 import { loadPrefs, animated } from './prefs.js';
 import { errText } from '../fileops.js';
@@ -58,7 +58,6 @@ export async function renderAddons(view, parts) {
   });
   current = { id, off, redraw: draw };
   await draw();
-  syncAddon(id).catch(() => {});
 }
 
 async function hub(view) {
@@ -81,9 +80,14 @@ async function hub(view) {
     ...head('Orbit'),
     h('div.ad-orbit', { hidden: !animated() }, h('i'), h('i'), h('i')),
     h('div.ad-tiles' + (animated() ? '.anim' : ''), tiles),
+    pass ? h('button.btn.block', { onclick: async (ev) => {
+      const b = ev.currentTarget; b.disabled = true; b.textContent = 'Gleiche ab …';
+      const bad = firstError(await syncAll());
+      toast(bad ? errText(bad) : 'Abgeglichen', bad ? 'err' : '');
+      hub(view);
+    } }, 'Jetzt abgleichen') : null,
     bad.length ? h('p.err-text.small', 'Abgleich-Problem bei ' + bad.map(([a]) => a.title).join(', ') + ' – Details unter Einstellungen.') : null));
   view.scrollTop = 0;
   const off = onAddon((aid) => { const e = subs.get(aid); if (e) e[1].textContent = subText(e[0]); });
   current = { id: null, off };
-  ADDONS.forEach((a) => syncAddon(a.id).catch(() => {}));
 }
