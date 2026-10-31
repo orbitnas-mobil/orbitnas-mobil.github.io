@@ -19,13 +19,21 @@ const MESSAGES = {
   2008: 'Dein pCloud-Speicher ist voll.',
   2001: 'Der Name ist ungültig.',
   2023: 'Ein Ordner kann nicht in sich selbst kopiert oder verschoben werden.',
-  4000: 'Zu viele Anmeldeversuche. Bitte ein paar Minuten warten.',
+  4000: 'pCloud hat die Anmeldung kurz gesperrt (zu viele Versuche). In ca. 15 Minuten wieder auf „Jetzt abgleichen“ tippen.',
   5000: 'pCloud ist gerade nicht erreichbar. Bitte später noch einmal.',
   7010: 'pCloud lässt diese Datei im Browser nicht direkt öffnen.',
 };
 const LOGIN_CODES = [1000, 2000, 2094, 2095, 2297, 4000];
 
+// pCloud sperrt nach zu vielen Anmeldungen die IP (Fehler 4000): dann 15 Minuten gar nichts mehr versuchen (geräteweit gemerkt)
+const COOL_KEY = 'orbit:pcloud-sperre';
+const COOL_MS = 15 * 60000;
+function coolLeft() { try { return Math.max(0, Number(localStorage.getItem(COOL_KEY) || 0) - Date.now()); } catch { return 0; } }
+function coolStart() { try { localStorage.setItem(COOL_KEY, String(Date.now() + COOL_MS)); } catch { /* egal */ } }
+export const pcloudSperreMinuten = () => Math.ceil(coolLeft() / 60000);
+
 function perr(method, code, text) {
+  if (code === 4000) coolStart();
   return new SourceError(MESSAGES[code] || text || 'Fehler bei pCloud', {
     code, detail: `pCloud ${method}: ${code} ${text || ''}`.trim(), login: LOGIN_CODES.includes(code), notFound: [2002, 2005, 2009, 2055].includes(code),
   });
@@ -78,13 +86,30 @@ export class PCloudSource {
 
   /** Anmelde-Angaben für eine Anfrage: Sitzungs-Schlüssel oder einzeln angemeldet. */
   async _cred() {
-    if (!this.useDigest && !this.auth) await this.login();
-    return this.useDigest ? this._signedFresh() : { auth: this.auth };
+    const left = coolLeft();
+    if (left > 0) throw perr('Sperre', 4000, `Pause noch ${Math.ceil(left / 60000)} Min`);
+    if (!this.useDigest && !this.auth) await this._loginOnce();
+    if (this.useDigest) { await this._gate(); return this._signedFresh(); }
+    return { auth: this.auth };
+  }
+
+  /** Mehrere gleichzeitige Anfragen teilen sich EINE Anmeldung. */
+  _loginOnce() {
+    if (!this._loginP) this._loginP = this.login().finally(() => { this._loginP = null; });
+    return this._loginP;
+  }
+
+  /** Im Einzelanmelde-Modus höchstens 3 Anfragen pro Sekunde, nacheinander (schont das Anmelde-Limit). */
+  _gate() {
+    const prev = this._gateP || Promise.resolve();
+    this._gateP = prev.then(() => new Promise((r) => setTimeout(r, 330)));
+    return prev;
   }
 
   _url(method, params) { return `https://${this.host}/${method}?${new URLSearchParams(params)}`; }
 
   async login() {
+    if (coolLeft() > 0) throw perr('Sperre', 4000, `Pause noch ${Math.ceil(coolLeft() / 60000)} Min`);
     let j = await this._getJson(this._url('userinfo', { getauth: 1, ...(await this._signed()) }), 'userinfo');
     if (j.result !== 0 && ![2297, 4000].includes(j.result)) {
       // Konten in Europa liegen bei eapi.pcloud.com, andere bei api.pcloud.com – den anderen Server versuchen
@@ -111,7 +136,7 @@ export class PCloudSource {
     const j = await res.json();
     if ((j.result === 1000 || j.result === 2000) && retried < 2) {
       // 1. Versuch: neuer Sitzungs-Schlüssel. 2. Versuch: ohne Schlüssel, jede Anfrage einzeln anmelden.
-      if (cred.auth && retried === 0) this.auth = null;
+      if (cred.auth && retried === 0) { if (this.auth === cred.auth) this.auth = null; }
       else if (!this.useDigest) { this.useDigest = true; this.authFailed = `pCloud ${method}: ${j.result} ${j.error || ''}`.trim(); }
       else return this._fail(method, j);
       return this.api(method, params, { body, signal, retried: retried + 1 });
@@ -128,7 +153,7 @@ export class PCloudSource {
 
   async info() {
     if (this.me && Date.now() - (this.meAt || 0) < 60000) return this.me;
-    if (!this.auth) await this.login();
+    if (!this.auth) await this._loginOnce();
     else { const j = await this.api('userinfo'); this.me = { email: j.email, used: j.usedquota, total: j.quota, key: 'pcloud:' + j.userid }; }
     this.meAt = Date.now();
     return this.me;

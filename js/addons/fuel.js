@@ -18,11 +18,26 @@ export async function materialize(api) {
 
 const state = { period: 'Alle', moreEntries: false, moreCosts: false, calc: { cents: '35', ev: '15', diesel: '2,20', dcons: '5,5' } };
 
+/** Leere Geister-Einträge (kein Fahrzeug, kein Betrag – zeigen „· undefined“ und 0,00 €) */
+const ghostE = (e) => !e || typeof e !== 'object' || (!e.vehicle && !(Number(e.amount) > 0) && !(Number(e.cost) > 0));
+const ghostC = (c) => !c || typeof c !== 'object' || (!c.vehicle && !(Number(c.amount) > 0));
+
+/** Geister-Einträge dauerhaft entfernen; vorher bleibt ein lokaler Stand erhalten (Einstellungen › Frühere Stände). */
+export async function cleanGhosts(api) {
+  const e0 = api.get('entries', []), c0 = api.get('costs', []);
+  const e1 = e0.filter((e) => !ghostE(e)), c1 = c0.filter((c) => !ghostC(c));
+  if (e1.length === e0.length && c1.length === c0.length) return 0;
+  try { const { snapshotLocal } = await import('./store.js'); await snapshotLocal('de.dennis.orbit-fuel', api.internal.data, 'Vor Bereinigung'); } catch { /* egal */ }
+  if (e1.length !== e0.length) await api.set('entries', e1);
+  if (c1.length !== c0.length) await api.set('costs', c1);
+  return (e0.length - e1.length) + (c0.length - c1.length);
+}
+
 function load(api) {
   // Datensätze ohne Namen (Geisterfahrzeuge aus leeren Einträgen) gehören nirgends hin: ausblenden, damit BMW und Tesla wieder vorgeschlagen werden
   const vehicles = api.get('vehicles', []).filter((v) => v && typeof v === 'object' && String(v.name || '').trim());
-  const entries = api.get('entries', []);
-  const costs = api.get('costs', []);
+  const entries = api.get('entries', []).filter((e) => !ghostE(e));
+  const costs = api.get('costs', []).filter((c) => !ghostC(c));
   // Standard-Fahrzeuge wie am PC: wenn die Liste leer ist oder Einträge sich auf sie beziehen
   // (nur im Speicher, nicht in die Cloud schreiben: sonst überschreibt ein leerer Handy-Stand die Fahrzeuge vom PC)
   const empty = vehicles.length === 0;
@@ -62,6 +77,7 @@ function stats(v, ents, cts) {
 }
 
 export async function render(el, api, nav) {
+  cleanGhosts(api).then((n) => { if (n) toast(`${n} leere(r) Eintrag/Einträge entfernt`); }).catch(() => {});
   const { vehicles, entries, costs } = load(api);
   const save = (key, val) => api.set(key, val);
   const act = vehicles.filter((v) => !v.archived);

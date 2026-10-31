@@ -19,7 +19,7 @@ import { formSheet, parseNum } from './addons/ui.js';
 import { deleteSecret } from './secrets.js';
 import { features, hubList, tabList, loadLayout, saveLayout, MAX_TABS } from './layout.js';
 import { loadSyncLoc, getSyncLoc, setSyncLoc, normFolder, localSnapshots, cloudVersions, readCloudVersion, restoreAddon, snapshotLocal, syncLog } from './addons/store.js';
-import { ADDONS, resetCloudSync, overwriteCloudFromHere, getSyncPass, setSyncPass, syncAddon, syncByHand, openAddon, importExportZip } from './addons/store.js';
+import { ADDONS, resetCloudSync, overwriteCloudFromHere, getSyncPass, setSyncPass, syncAddon, syncAll, firstError, syncByHand, openAddon, importExportZip } from './addons/store.js';
 
 const group = (title, foot, ...rows) => h('section.group', title ? h('h2.group-title', title) : null, h('div.group-body', rows), foot ? h('p.group-foot', foot) : null);
 const navRow = (ic, color, title, sub, onclick, value = '') => h('button.row', { onclick },
@@ -328,9 +328,8 @@ async function addonsGroup(rerender) {
       if (pass) { const p2 = await promptDialog('Neues Passwort zur Kontrolle noch einmal eingeben.', '', { title: 'Wiederholen', ok: 'Speichern' }); if (p2 !== p) { toast('Die beiden Eingaben passen nicht zusammen.', 'err'); return; } }
       await setSyncPass(p);
       toast('Gespeichert. Gleiche ab …');
-      const res = await Promise.allSettled(ADDONS.map((a) => syncAddon(a.id)));
-      const bad = res.find((r) => r.status === 'rejected');
-      toast(bad ? errText(bad.reason) : 'Abgeglichen', bad ? 'err' : '');
+      const bad = firstError(await syncAll());
+      toast(bad ? errText(bad) : 'Abgeglichen', bad ? 'err' : '');
       rerender();
     }),
     actRow('Daten aus Orbit-Export importieren …', () => {
@@ -358,17 +357,15 @@ async function addonsGroup(rerender) {
       const p = await promptDialog('Neues Sync-Passwort (dasselbe wie am PC nach dem Zurücksetzen dort).', '', { title: 'Neues Sync-Passwort', ok: 'Speichern' });
       if (p) {
         await setSyncPass(p);
-        const res = await Promise.allSettled(ADDONS.map((a) => syncAddon(a.id)));
-        const bad = res.find((r) => r.status === 'rejected');
-        toast(bad ? errText(bad.reason) : 'Zurückgesetzt und neu abgeglichen', bad ? 'err' : '');
+        const bad = firstError(await syncAll());
+        toast(bad ? errText(bad) : 'Zurückgesetzt und neu abgeglichen', bad ? 'err' : '');
       } else toast('Zurückgesetzt. Ohne neues Passwort ruht der Abgleich.');
       rerender();
     }, true),
     pass ? actRow('Sync-Passwort entfernen', async () => { await setSyncPass(''); rerender(); }, true) : null,
     pass ? actRow('Jetzt alle abgleichen', async () => {
-      const res = await Promise.allSettled(ADDONS.map((a) => syncAddon(a.id)));
-      const bad = res.find((r) => r.status === 'rejected');
-      toast(bad ? errText(bad.reason) : 'Abgeglichen', bad ? 'err' : '');
+      const bad = firstError(await syncAll());
+      toast(bad ? errText(bad) : 'Abgeglichen', bad ? 'err' : '');
       rerender();
     }) : null,
     ...rows);

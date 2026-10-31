@@ -137,8 +137,6 @@ async function changed() {
   dirty = true;
   await saveLocal();
   emit();
-  clearTimeout(writeTimer);
-  writeTimer = setTimeout(() => syncStore(), 800);
 }
 
 // ---------------------------------------------------------------- Lesen für die Oberfläche
@@ -235,6 +233,9 @@ export async function forgetPaths(cloud, path) {
   if (any) await changed();
 }
 
-// Abgleich alle 2 Minuten und beim Zurückkehren in die App (wie der PC)
-setInterval(() => { if (document.visibilityState === 'visible') syncStore(); }, 120000);
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') syncStore(); });
+// Abgleich nur beim App-Start, per „Jetzt abgleichen“ und nach längerer Abwesenheit (über 15 Minuten) – kein Zeitgeber mehr
+let hiddenSince = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') { hiddenSince = Date.now(); if (dirty) syncStore(); }
+  else if (hiddenSince && Date.now() - hiddenSince > 15 * 60000) syncStore();
+});

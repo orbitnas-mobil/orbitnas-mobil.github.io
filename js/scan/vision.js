@@ -106,10 +106,55 @@ function homography(dst, src) {
 
 const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 
+/** Vernünftiges Blatt? Konvex, Winkel 55–125°, keine winzige Kante. */
+export function quadOk(q, w, h) {
+  if (!q || q.length !== 4) return false;
+  const min = Math.min(w, h) * 0.12;
+  for (let i = 0; i < 4; i++) {
+    const a = q[i], b = q[(i + 1) % 4], c = q[(i + 2) % 4];
+    if (dist(a, b) < min) return false;
+    const abx = a[0] - b[0], aby = a[1] - b[1], cbx = c[0] - b[0], cby = c[1] - b[1];
+    const cross = abx * cby - aby * cbx;
+    if (cross >= 0) return false;                       // gleiche Drehrichtung (Bild: y nach unten) = konvex
+    const ang = Math.acos((abx * cbx + aby * cby) / (Math.hypot(abx, aby) * Math.hypot(cbx, cby))) * 180 / Math.PI;
+    if (ang < 55 || ang > 125) return false;
+  }
+  return true;
+}
+
+/** Wahres Seitenverhältnis (Breite/Höhe) des Blattes aus dem perspektivisch verzerrten Viereck (Zhang/He, Bildmitte = Hauptpunkt).
+ *  Verhindert „gestauchte“ Scans, wenn schräg fotografiert wurde. Nahe an A4 wird auf A4 gerastet. */
+export function estimateAspect(quad, w, h) {
+  const edge = (Math.max(dist(quad[0], quad[1]), dist(quad[3], quad[2])) / Math.max(dist(quad[0], quad[3]), dist(quad[1], quad[2])));
+  let ratio = edge;
+  try {
+    const cx = w / 2, cy = h / 2;
+    const m = (i) => [quad[i][0] - cx, quad[i][1] - cy, 1];
+    const m1 = m(0), m2 = m(1), m3 = m(3), m4 = m(2);          // TL, TR, BL, BR
+    const cr = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    const dt = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    const k2 = dt(cr(m1, m4), m3) / dt(cr(m2, m4), m3), k3 = dt(cr(m1, m4), m2) / dt(cr(m3, m4), m2);
+    const n2 = m2.map((v, i) => k2 * v - m1[i]), n3 = m3.map((v, i) => k3 * v - m1[i]);
+    // Brennweite aus dem Blatt schätzen; bei (fast) rechtwinkliger Aufnahme geht das nicht → typische Handykamera (~0,75 × lange Bildseite)
+    const L = Math.max(w, h), f2c = -(n2[0] * n3[0] + n2[1] * n3[1]) / (n2[2] * n3[2]);
+    const f = isFinite(f2c) && f2c > 0 ? Math.min(1.6 * L, Math.max(0.45 * L, Math.sqrt(f2c))) : 0.75 * L;
+    const f2 = f * f;
+    const r2 = (n2[0] ** 2 + n2[1] ** 2) / f2 + n2[2] ** 2, d2 = (n3[0] ** 2 + n3[1] ** 2) / f2 + n3[2] ** 2;
+    const r = Math.sqrt(r2 / d2);
+    if (isFinite(r) && r > 0.25 && r < 4 && r / edge > 0.35 && r / edge < 1.8) ratio = r;
+  } catch { /* Kantenverhältnis bleibt */ }
+  const A4 = Math.SQRT2;
+  if (Math.abs(ratio - 1 / A4) < 0.07) ratio = 1 / A4;
+  else if (Math.abs(ratio - A4) < 0.14) ratio = A4;
+  return ratio;
+}
+
 /** Viereck (in Pixeln von srcCanvas) zu einem geraden Rechteck entzerren. maxSide begrenzt die längere Seite. */
 export function warp(srcCanvas, quad, maxSide = 2000) {
   const [tl, tr, br, bl] = quad;
-  let W = Math.max(dist(tl, tr), dist(bl, br)), H = Math.max(dist(tl, bl), dist(tr, br));
+  const ratio = estimateAspect(quad, srcCanvas.width, srcCanvas.height);
+  let H = Math.max(dist(tl, bl), dist(tr, br)), W = H * ratio;
+  if (W < Math.max(dist(tl, tr), dist(bl, br)) * 0.5) { W = Math.max(dist(tl, tr), dist(bl, br)); H = W / ratio; }
   const k = Math.min(1, maxSide / Math.max(W, H));
   W = Math.max(16, Math.round(W * k)); H = Math.max(16, Math.round(H * k));
   const sctx = srcCanvas.getContext('2d', { willReadFrequently: true });
@@ -208,6 +253,10 @@ export async function loadPhoto(file, maxSide = 2400) {
 
 /** Ganzes Foto -> erkannte Ecken in Foto-Pixeln (oder null). */
 export function findDocument(canvas) {
+  const raw = findRaw(canvas);
+  return raw && quadOk(raw, canvas.width, canvas.height) ? raw : null;
+}
+function findRaw(canvas) {
   const k = Math.min(1, 360 / Math.max(canvas.width, canvas.height));
   const s = document.createElement('canvas');
   s.width = Math.max(8, Math.round(canvas.width * k)); s.height = Math.max(8, Math.round(canvas.height * k));
@@ -215,4 +264,12 @@ export function findDocument(canvas) {
   c.drawImage(canvas, 0, 0, s.width, s.height);
   const q = detectQuad(c.getImageData(0, 0, s.width, s.height));
   return q ? q.map(([x, y]) => [x / k, y / k]) : null;
+}
+
+/** Startviereck für die Ecken-Anpassung: erkannt, sonst ein Rahmen mit 6 % Rand. */
+export function startQuad(canvas) {
+  const q = findDocument(canvas);
+  if (q) return { quad: q, auto: true };
+  const w = canvas.width, h = canvas.height, mx = w * 0.06, my = h * 0.06;
+  return { quad: [[mx, my], [w - mx, my], [w - mx, h - my], [mx, h - my]], auto: false };
 }

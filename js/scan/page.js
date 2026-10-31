@@ -10,7 +10,8 @@ import { pickFolder } from '../picker.js';
 import { connName, errText } from '../fileops.js';
 import { openAddon, onAddon } from '../addons/store.js';
 import { formSheet, newId, deDate } from '../addons/ui.js';
-import { loadPhoto, findDocument, warp, enhance, rotate } from './vision.js';
+import { loadPhoto, findDocument, startQuad, warp, enhance, rotate } from './vision.js';
+import { cropEditor } from './crop.js';
 import { buildPdf } from './pdf.js';
 import { recognize, stopOcr } from './ocr.js';
 
@@ -29,7 +30,7 @@ const QUALITY = { standard: { side: 2000, jpeg: 0.72, label: 'Standard' }, hoch:
 const MODES = { dokument: 'Dokument (grau, klar)', farbe: 'Farbe', sw: 'Schwarz-Weiß' };
 
 export async function loadScanSettings() {
-  return { folder: null, mode: 'dokument', quality: 'standard', ocr: true, sort: true, rules: DEFAULT_RULES, prefix: 'Scan', ...(await kv.get(KEY)) };
+  return { folder: null, mode: 'dokument', quality: 'standard', ocr: true, sort: true, rules: DEFAULT_RULES, prefix: 'Scan', cropAsk: true, ...(await kv.get(KEY)) };
 }
 const saveScanSettings = (s) => kv.set(KEY, s);
 
@@ -77,12 +78,17 @@ export async function renderScan(view) {
     busy = true; redraw();
     try {
       const photo = await loadPhoto(file, 2800);
-      const quad = findDocument(photo);
-      const p = { photo, quad, useQuad: !!quad, mode: st.mode, rot: 0, out: null };
+      let quad = findDocument(photo), useQuad = !!quad;
+      if (st.cropAsk || !quad) {
+        // Ecken prüfen bzw. selbst setzen (erkannte Ränder sind schon vorgewählt)
+        const r = await cropEditor(photo, startQuad(photo).quad);
+        if (!r) { busy = false; redraw(); return; }
+        if (r.quad) { quad = r.quad; useQuad = true; } else useQuad = false;
+      }
+      const p = { photo, quad, useQuad, mode: st.mode, rot: 0, out: null };
       await new Promise((r) => setTimeout(r, 0));
       await render(p);
       pending.push(p);
-      if (!quad) toast('Die Ränder wurden nicht sicher erkannt – es wird das ganze Foto verwendet.');
     } catch (e) { toast(errText(e), 'err'); }
     busy = false; redraw();
   }
@@ -97,6 +103,12 @@ export async function renderScan(view) {
   function pageMenu(p, i) {
     const redo = async () => { busy = true; redraw(); try { await render(p); } catch (e) { toast(errText(e), 'err'); } busy = false; redraw(); };
     actionSheet(`Seite ${i + 1}`, [
+      { label: 'Zuschneiden …', icon: 'camera', onclick: async () => {
+        const r = await cropEditor(p.photo, p.quad || startQuad(p.photo).quad);
+        if (!r) return;
+        if (r.quad) { p.quad = r.quad; p.useQuad = true; } else p.useQuad = false;
+        redo();
+      } },
       { label: 'Nach rechts drehen', icon: 'sync', onclick: () => { p.rot = (p.rot + 1) % 4; redo(); } },
       { label: 'Nach links drehen', icon: 'sync', onclick: () => { p.rot = (p.rot + 3) % 4; redo(); } },
       { label: p.useQuad ? 'Ganzes Foto verwenden' : 'Ränder automatisch erkennen', icon: 'camera', onclick: () => {
@@ -238,12 +250,13 @@ function settingsSheet(st, done) {
     fields: [
       { key: 'mode', label: 'Darstellung', type: 'select', options: Object.entries(MODES).map(([value, label]) => ({ value, label })), value: st.mode },
       { key: 'quality', label: 'Bildqualität (Dateigröße)', type: 'select', options: Object.entries(QUALITY).map(([value, q]) => ({ value, label: q.label })), value: st.quality },
+      { key: 'cropAsk', label: 'Nach dem Foto die Ecken prüfen (Zuschneiden)', type: 'check', value: st.cropAsk },
       { key: 'ocr', label: 'Text erkennen (PDF durchsuchbar)', type: 'check', value: st.ocr },
       { key: 'sort', label: 'Nach Regeln in Unterordner sortieren', type: 'check', value: st.sort },
       { key: 'prefix', label: 'Dateiname beginnt mit', type: 'text', value: st.prefix },
     ],
     extra,
-    onSubmit: async (v) => { Object.assign(st, { mode: v.mode, quality: v.quality, ocr: v.ocr, sort: v.sort, prefix: v.prefix.trim() || 'Scan' }); await saveScanSettings(st); done(); },
+    onSubmit: async (v) => { Object.assign(st, { mode: v.mode, quality: v.quality, cropAsk: v.cropAsk, ocr: v.ocr, sort: v.sort, prefix: v.prefix.trim() || 'Scan' }); await saveScanSettings(st); done(); },
   });
 }
 
