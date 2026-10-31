@@ -385,18 +385,23 @@ async function assembleRemote(src, pc, pass, L, base, meta) {
 function bulkDeleteCheck(local, merged, L) {
   const lines = [];
   for (const [key, val] of Object.entries(local)) {
-    const l = asList(val); if (!l || l.length < 4) continue;
+    const l = asList(val); if (!l || l.length < 2) continue;
     const m = has(merged, key) ? asList(merged[key]) : [];
     const ids = new Set((m || []).map((e) => String(e.id)));
     const gone = l.filter((e) => !ids.has(String(e.id))).length;
-    if (gone >= 3 && gone > l.length / 2) lines.push(`${gone} von ${l.length} Einträgen („${key}“) würden hier gelöscht`);
+    if (gone >= 2 && gone >= l.length / 2) lines.push(`${gone} von ${l.length} Einträgen („${key}“) würden hier gelöscht`);
+  }
+  for (const [key, val] of Object.entries(local)) {
+    if (asList(val) || val == null || val === '' || val === '[]' || val === '{}') continue;
+    const m = has(merged, key) ? merged[key] : null;
+    if (m == null || m === '' || m === '[]') lines.push(`„${key}“ würde hier geleert`);
   }
   for (const [key, map] of L ? L.lists : []) {
-    const live = [...map.values()].filter((e) => !e.best.del).length; if (live < 4) continue;
+    const live = [...map.values()].filter((e) => !e.best.del).length; if (live < 2) continue;
     const m = has(merged, key) ? asList(merged[key]) : [];
     const ids = new Set((m || []).map((e) => String(e.id)));
     const gone = [...map.entries()].filter(([id, e]) => !e.best.del && !ids.has(id)).length;
-    if (gone >= 3 && gone > live / 2) lines.push(`${gone} von ${live} Einträgen („${key}“) würden in der Cloud gelöscht`);
+    if (gone >= 2 && gone >= live / 2) lines.push(`${gone} von ${live} Einträgen („${key}“) würden in der Cloud gelöscht`);
   }
   return lines;
 }
@@ -434,7 +439,7 @@ async function pushRecs(src, pc, pass, merged, L, meta) {
     await dir(sub);
     const path = root + '/' + sub.join('/') + '/' + safeName(o.id) + '.' + t + (o.del ? '.del' : '.orbit');
     await src.writeText(path, await encRec(pass, pc, o.del ? { id: o.id, key: o.key, t, del: true } : { id: o.id, key: o.key, t, v: o.rec }));
-    for (const old of o.e?.all || []) { try { await src.remove(old.item); } catch { /* bleibt eben liegen */ } }
+    if (!o.del) for (const old of o.e?.all || []) { try { await src.remove(old.item); } catch { /* bleibt eben liegen */ } }
     if (o.L) { if (o.del) delete nm.L[o.key]?.[o.id]; else (nm.L[o.key] ||= {})[o.id] = t; } else nm.V[o.key] = t;
     n++;
   }), 5);
@@ -586,7 +591,7 @@ export function syncAddon(id, opts = {}) {
           if (bad.length) throw new BulkDeleteError('Sicherheitsstopp: ' + bad.join('; ') + '. Es wurde nichts verändert. Unter „Frühere Stände“ kannst du einen Stand zurückholen, oder die Löschung mit „Trotzdem abgleichen“ bestätigen.');
         }
         if (a.rev !== rev0) continue;          // inzwischen etwas geändert: nochmal
-        if (changesLocal) await snapshotLocal(a.pc, a.data, 'Vor Abgleich');
+        if (changesLocal) await snapshotLocal(a.pc, a.data, 'Vor Abgleich', true);
         const pushed = await pushRecs(src, a.pc, pass, merged, L, a.meta);
         if (a.rev !== rev0) { a.meta = pushed.meta; continue; }
         if (changesLocal) { a.data = merged; checkVersion(a); }
