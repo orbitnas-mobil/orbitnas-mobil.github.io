@@ -9,6 +9,7 @@ const DEFAULTS = {
   workKm: 130,                   // km pro Arbeitstag
   fuelCharts: true,
   notesColor: 'Indigo',
+  fitHeight: 0, fitTarget: 0, fitBirth: '', fitGender: 'männlich', fitGoal: 2000, fitBmr: 0,   // Fitness-Profil
   vaultMinutes: 3,               // Tresor sperrt nach so vielen Minuten ohne Bedienung
   vaultFace: false,              // Tresor mit Face ID öffnen
 };
@@ -26,6 +27,7 @@ export const pref = (k) => cur[k];
 export const SHARED = {
   fuel: { fuelCharts: 'show_charts', fuelPrice: 'fuel_price', workKm: 'work_km', fuelVehicle: 'fuel_vehicle' },
   notes: { notesColor: 'notes_color' },
+  fitness: { fitHeight: 'height', fitTarget: 'target_weight', fitBirth: 'birth_date', fitGender: 'gender', fitGoal: 'daily_goal', fitBmr: 'bmr' },
   vault: { vaultMinutes: 'autolock_min' },
 };
 export async function setPrefs(patch) {

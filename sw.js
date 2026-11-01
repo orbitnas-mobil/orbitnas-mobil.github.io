@@ -1,5 +1,5 @@
 // Offline-Modus: Die App selbst liegt auf dem Gerät. Deine Daten (IndexedDB) fasst dieser Teil nie an.
-const BUILD = "25c1bd205311";
+const BUILD = "f6d0830c09fc";
 const APP_CACHE = 'orbitnas-app-' + BUILD;
 const THUMBS = 'orbitnas-thumbs';
 const OCR_CACHE = 'orbitnas-ocr-1';
@@ -38,6 +38,7 @@ const ASSETS = [
   "./js/upload.js",
   "./js/util.js",
   "./js/version.js",
+  "./js/addons/fitness.js",
   "./js/addons/fuel.js",
   "./js/addons/index.js",
   "./js/addons/ledger-core.js",
