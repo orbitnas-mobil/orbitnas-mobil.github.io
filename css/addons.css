@@ -168,3 +168,11 @@ html.typing *, html.typing *::before, html.typing *::after { animation-play-stat
 .ad-card h3 { text-transform: uppercase; letter-spacing: .06em; font-size: 12.5px; font-weight: 700; border-left: 3px solid var(--accent); padding-left: 8px; }
 .ad-strength { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; margin-top: 6px; }
 .ad-strength i { display: block; height: 100%; border-radius: 3px; }
+/* 1.5.3: feinere Kacheln – einheitlicher Rand (1,5 px) mit Farbverlauf, weichere Ecken */
+.ad-tile, .ad-card, .ad-banner {
+  border: 1.5px solid transparent; border-radius: 18px;
+  background: linear-gradient(var(--surface), var(--surface)) padding-box,
+              linear-gradient(135deg, color-mix(in srgb, var(--c, var(--accent)) 65%, var(--border)), var(--border)) border-box;
+}
+.ad-stat { border-radius: 14px; }
+.ad-page { -webkit-font-smoothing: antialiased; text-rendering: geometricPrecision; }
