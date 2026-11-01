@@ -15,6 +15,7 @@ const MODULES = {
   fuel: () => import('./fuel.js'),
   notes: () => import('./notes.js'),
   trips: () => import('./trips.js'),
+  fitness: () => import('./fitness.js'),
   vault: () => import('./vault.js'),
 };
 
