@@ -159,7 +159,7 @@ export async function render(el, api, nav) {
     const cats = [...new Set(list.map((e) => e.category || 'Allgemein'))];
     for (const c of cats) {
       page.append(h('h3.ad-cat', c), h('div.ad-list', list.filter((e) => (e.category || 'Allgemein') === c).map((e) => h('button.ad-item', { onclick: () => detail(e) },
-        h('span.ad-i-main', h('b', e.title), e.username ? h('small.muted', e.username) : null), icon('chevron', 'chev')))));
+        h('span.ad-i-main', h('b', (e.favorite ? '★ ' : '') + e.title), e.username ? h('small.muted', e.username) : null), icon('chevron', 'chev')))));
     }
   }
 
@@ -180,11 +180,45 @@ export async function render(el, api, nav) {
     const body = h('div.ad-detail',
       e.username ? field('Benutzername', h('span', e.username), () => copy(e.username, 'Benutzername')) : null,
       e.password ? field('Passwort', pwEl, () => copy(e.password, 'Passwort'), h('button.icon-btn', { 'aria-label': 'Anzeigen', onclick: (ev) => { shown = !shown; pwEl.textContent = shown ? e.password : '••••••••••'; ev.currentTarget.replaceChildren(icon(shown ? 'eyeOff' : 'eye')); } }, icon('eye'))) : null,
+      e.password ? h('div.ad-fieldrow', h('small.muted', 'Stärke: ' + strengthLabel(e.password)), h('div.ad-strength', h('i', { style: `width:${strength(e.password)}%;background:${strength(e.password) >= 70 ? '#3dffa2' : strength(e.password) >= 40 ? '#ffd24a' : '#ff5a6a'}` }))) : null,
+      e.totp ? totpField(e.totp) : null,
       e.url ? field('Adresse', h('span.ellipsis', e.url), () => copy(e.url, 'Adresse'), /^https?:\/\//i.test(e.url) ? h('button.icon-btn', { 'aria-label': 'Öffnen', onclick: () => window.open(e.url, '_blank', 'noopener') }, icon('link')) : null) : null,
       e.notes ? h('div.ad-fieldrow', h('small.muted', 'Notizen'), h('p.ad-notes-txt', e.notes)) : null,
       h('div.btn-row', h('button.btn.danger', { onclick: async () => { s.close(); if (await confirmDialog(`„${e.title}“ löschen?`, { danger: true, ok: 'Löschen' })) { await mutate((l) => l.filter((x) => x.id !== e.id)); toast('Eintrag gelöscht.'); } } }, 'Löschen'),
         h('button.btn.primary', { onclick: () => { s.close(); entryForm(e); } }, 'Bearbeiten')));
     const s = sheet(body, { title: e.title, onClose: () => { shown = false; } });
+  }
+  function strength(pw) {
+    const p = String(pw || ''); if (!p) return 0;
+    const cls = (/[a-z]/.test(p) ? 26 : 0) + (/[A-Z]/.test(p) ? 26 : 0) + (/\d/.test(p) ? 10 : 0) + (/[^A-Za-z0-9]/.test(p) ? 32 : 0);
+    const uniq = new Set(p).size;
+    const bits = Math.log2(Math.max(cls, 2)) * (uniq < Math.max(3, p.length / 3) ? uniq : p.length);
+    return Math.max(3, Math.min(100, Math.round(bits / 80 * 100)));
+  }
+  function strengthLabel(pw) { const x = strength(pw); return x >= 70 ? 'stark' : x >= 40 ? 'mittel' : 'schwach'; }
+  async function totpCode(secret) {
+    const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; let bits = 0, acc = 0; const bytes = [];
+    for (const c of String(secret).replace(/[\s=-]/g, '').toUpperCase()) { const v = A.indexOf(c); if (v < 0) return null; acc = (acc << 5) | v; bits += 5; if (bits >= 8) { bits -= 8; bytes.push((acc >> bits) & 255); } }
+    if (!bytes.length) return null;
+    const key = await crypto.subtle.importKey('raw', new Uint8Array(bytes), { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
+    const counter = Math.floor(Date.now() / 30000); const msg = new Uint8Array(8); new DataView(msg.buffer).setUint32(4, counter);
+    const h20 = new Uint8Array(await crypto.subtle.sign('HMAC', key, msg)); const o = h20[19] & 15;
+    const bin = ((h20[o] & 127) << 24) | (h20[o + 1] << 16) | (h20[o + 2] << 8) | h20[o + 3];
+    return String(bin % 1000000).padStart(6, '0');
+  }
+  function totpField(secret) {
+    const val = h('span.ad-pw', '······'); const left = h('small.muted', '');
+    let seen = false;
+    const tick = async () => {
+      if (seen && !val.isConnected) return;
+      const c = await totpCode(secret);
+      val.textContent = c ? `${c.slice(0, 3)} ${c.slice(3)}` : 'Ungültiges Geheimnis';
+      left.textContent = `${30 - (Math.floor(Date.now() / 1000) % 30)} s`;
+      if (val.isConnected) seen = true;
+      setTimeout(tick, 1000);
+    };
+    setTimeout(tick, 0);
+    return h('div.ad-fieldrow', h('small.muted', '2FA-Code'), h('div.ad-fv', val, left, h('span.spacer'), h('button.icon-btn', { 'aria-label': 'Kopieren', onclick: async () => { const c = await totpCode(secret); if (c) copy(c, 'Code'); } }, icon('copy'))));
   }
   function field(label, valueEl, onCopy, extra = null) {
     return h('div.ad-fieldrow', h('small.muted', label), h('div.ad-fv', valueEl, h('span.spacer'), extra, h('button.icon-btn', { 'aria-label': 'Kopieren', onclick: onCopy }, icon('copy'))));
@@ -213,13 +247,15 @@ export async function render(el, api, nav) {
         { key: 'username', label: 'Benutzername', type: 'text', value: e?.username || '' },
         { key: 'password', label: 'Passwort', type: 'text', value: e?.password || '' },
         { key: 'url', label: 'Adresse', type: 'text', value: e?.url || '' },
+        { key: 'totp', label: '2FA-Geheimnis (optional, Base32)', type: 'text', value: e?.totp || '' },
+        { key: 'favorite', label: 'Favorit', type: 'select', options: ['Nein', 'Ja'], value: e?.favorite ? 'Ja' : 'Nein' },
         { key: 'notes', label: 'Notizen', type: 'textarea', value: e?.notes || '', rows: 3 },
       ],
       extra: gen,
       onSubmit: async (v) => {
         const title = v.title.trim();
         if (!title) return 'Bitte einen Titel eingeben.';
-        const rec = { id: e?.id || newId(), title, username: v.username.trim(), password: v.password, url: v.url.trim(), notes: v.notes, category: v.category };
+        const rec = { id: e?.id || newId(), title, username: v.username.trim(), password: v.password, url: v.url.trim(), notes: v.notes, category: v.category, totp: v.totp.trim(), favorite: v.favorite === 'Ja' };
         await mutate((l) => (e ? l.map((x) => (x.id === e.id ? rec : x)) : [...l, rec]));
         toast('Gespeichert.');
       },
