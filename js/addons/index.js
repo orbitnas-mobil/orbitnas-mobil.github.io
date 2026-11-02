@@ -30,6 +30,7 @@ export async function renderAddons(view, parts) {
   const meta = addonById(id);
   const api = await openAddon(id);
   const mod = await MODULES[id]();
+  if (id === 'vault') mod.lockVault();   // Tresor: bei jedem Öffnen neu entsperren
   const box = h('div.ad-root');
   const footer = h('div.ad-sync');
   clear(view).append(box, footer);
