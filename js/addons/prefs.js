@@ -11,7 +11,7 @@ const DEFAULTS = {
   notesColor: 'Indigo',
   fitHeight: 0, fitTarget: 0, fitBirth: '', fitGender: 'männlich', fitGoal: 2000, fitBmr: 0,   // Fitness-Profil
   vaultMinutes: 3,               // Tresor sperrt nach so vielen Minuten ohne Bedienung
-  vaultFace: false,              // Tresor mit Face ID öffnen
+  vaultFace: true,               // Tresor mit Face ID öffnen (Standard), sonst Master-Passwort
 };
 let cur = { ...DEFAULTS };
 let loaded = false;

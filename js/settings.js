@@ -344,7 +344,7 @@ async function addonPrefsGroup(rerender) {
     title: 'Tresor',
     fields: [
       { key: 'min', label: 'Automatisch sperren nach (Minuten)', type: 'select', options: ['1', '2', '3', '5', '10', '15'], value: String(pref('vaultMinutes')) },
-      { key: 'face', label: 'Mit Face ID öffnen', type: 'check', value: pref('vaultFace'), hint: 'Nur für den Tresor (die App selbst bleibt davon unberührt). Das Master-Passwort bleibt verschlüsselt auf diesem Gerät. Beim ersten Mal das Passwort einmal von Hand eingeben.' },
+      { key: 'face', label: 'Mit Face ID öffnen', type: 'check', value: pref('vaultFace'), hint: 'Der Tresor fragt bei JEDEM Öffnen (Face ID oder Master-Passwort). Aus = nur Master-Passwort. Nur für den Tresor (die App selbst bleibt davon unberührt). Das Master-Passwort bleibt verschlüsselt auf diesem Gerät. Beim ersten Mal das Passwort einmal von Hand eingeben.' },
     ],
     onSubmit: async (v) => {
       if (v.face && !(await kv.get('vault:face'))?.id) {

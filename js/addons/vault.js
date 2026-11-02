@@ -5,7 +5,7 @@ import { h, icon, toast, actionSheet, confirmDialog, sheet } from '../util.js';
 import { head, formSheet, newId } from './ui.js';
 import { syncAddon } from './store.js';
 import { pref } from './prefs.js';
-import { checkCredential } from '../lock.js';
+import { checkCredential, faceIdAvailable, enrollCredential } from '../lock.js';
 import { kv } from '../db.js';
 import { saveSecret, loadSecret, deleteSecret } from '../secrets.js';
 
@@ -119,6 +119,9 @@ export async function render(el, api, nav) {
       if (list == null) {
         if (viaFace) { await deleteSecret('vaultPw'); fail('Das Master-Passwort hat sich geändert. Bitte einmal von Hand eingeben.'); } else { fail('Falsches Master-Passwort.'); pw.select(); }
         return false;
+      }
+      if (pref('vaultFace') && !S.faceId && !viaFace) {   // Standard Face ID: beim ersten manuellen Entsperren einrichten
+        try { if (await faceIdAvailable()) { const id = await enrollCredential(); await kv.set(VAULT_FACE_KEY, { id, created: new Date().toISOString() }); S.faceId = id; } } catch { /* Passwort bleibt möglich */ }
       }
       if (pref('vaultFace') && S.faceId && !viaFace) { try { await saveSecret('vaultPw', { pw: password }); } catch { /* egal */ } }
       S.keys = keys; S.salt = hdr.salt; S.entries = list; touch();
